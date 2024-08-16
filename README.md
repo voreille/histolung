@@ -57,5 +57,51 @@ A short description of the project.
     └── plots.py                <- Code to create visualizations
 ```
 
+## codebase organization
+```
+LungHistoMIL/
+│
+├── config/                         # Configuration files
+│   ├── model_config.yaml
+│
+├── data/                           # Data processing and loading scripts
+│   ├── dataset.py
+│
+├── models/                         # Models and wrappers
+│   ├── __init__.py
+│   ├── base_model.py               # Base wrapper class for models
+│   ├── unified_mil_model.py        # Unified model with feature extraction and aggregation
+│   ├── model_factory.py            # Factory for model creation
+│
+├── mil/                            # MIL training and evaluation
+│   ├── mil_trainer.py              # MIL training and testing loop
+│   ├── loss.py                     # MIL loss functions
+│   ├── metrics.py                  # Custom metrics for MIL
+│
+├── explainability/                 # Explainable AI methods
+│   ├── grad_cam.py                 # Grad-CAM implementation
+│   ├── lime_explainer.py           # LIME implementation
+│   ├── concept_explainer.py        # Concept-based methods (ACE, TCAV)
+│   ├── explainer_factory.py        # Factory for creating explainer objects
+│   ├── integrated_gradients.py     # Integrated Gradients implementation
+│   ├── __init__.py
+│
+├── scripts/                        # Scripts to run experiments
+│   ├── train.py                    # Entry point for training
+│   ├── explain.py                  # Script to run explainability methods
+│
+├── utils/                          # Utility functions
+│   ├── config_loader.py            # YAML configuration loader
+│   ├── visualization.py            # Visualization tools for explainability
+│
+├── tests/                          # Unit and integration tests
+│   ├── test_unified_mil_model.py
+│   ├── test_mil_trainer.py
+│   ├── test_explainability.py      # Tests for explainability methods
+│
+├── README.md                       # Project documentation
+├── requirements.txt                # Dependencies
+└── setup.py                        # Setup script
+```
 --------
 
