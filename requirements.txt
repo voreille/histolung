@@ -8,3 +8,6 @@ python-dotenv
 tqdm
 typer
 -e .
+
+mlfow
+
