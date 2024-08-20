@@ -1,5 +1,5 @@
 import yaml
-from .unified_mil_model import UnifiedMILModel
+from .base_mil_model import UnifiedMILModel
 
 
 def create_model(config_file: str):
