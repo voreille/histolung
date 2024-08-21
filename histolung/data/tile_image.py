@@ -80,17 +80,6 @@ def tile_images(input_image, output_dir, docker_image, user, crossed_image):
         "/pyhist/output/", f"/pyhist/images/{filename}"
     ]
 
-    # # Add optional arguments
-    # if crossed_image:
-    #     command.append("--save-tilecrossed-image")
-
-    # # Specify the input image path and the output path in the container
-    # input_image_path = f"/pyhist/images/"
-    # output_path = f"--output /pyhist/output/ {input_image_path}"
-
-    # # Append output argument and image directory
-    # command.extend(output_path.split())
-
     # Run the Docker command
     try:
         print("Running the Docker tiling process...")
