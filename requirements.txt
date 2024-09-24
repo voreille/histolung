@@ -2,12 +2,15 @@ black
 flake8
 isort
 loguru
-mkdocs
 pip
 python-dotenv
 tqdm
 typer
--e .
 
-mlfow
+# mlfow
+timm
+mkdocs
+-e .
+jupyter
+matplotlib
 
