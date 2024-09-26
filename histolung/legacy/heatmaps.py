@@ -210,7 +210,7 @@ downsample_factor = 4
 )
 def main(wsi_name, sigma):
 
-    datadir = Path(thispath.parent.parent / "data" / "tcga")
+    datadir = Path(thispath.parents[2] / "data" / "tcga_old")
     tcgadir = Path(Path(datadir) / "wsi")
     patchdir = Path(Path(datadir) / "patches")
     maskdir = Path(Path(datadir) / "mask")
@@ -270,8 +270,8 @@ def main(wsi_name, sigma):
     #         print(f"Loaded WSI from {file_path}")
     #         break
 
-    modeldir = Path(thispath.parent.parent / "trained_models" / "MIL" /
-                    "f_MIL_res34v2_v2_rumc_best_cosine_v3")
+    modeldir = Path(thispath.parents[2] /
+                    "models/MIL/f_MIL_res34v2_v2_rumc_best_cosine_v3")
 
     cfg = yaml_load(modeldir /
                     f"config_f_MIL_res34v2_v2_rumc_best_cosine_v3.yml")
@@ -406,7 +406,7 @@ def main(wsi_name, sigma):
         final_prediction = "Normal"
         my_cmap = my_cmap_blue
 
-    outputdir = Path(datadir.parent / "outputs")
+    outputdir = Path(thispath.parents[2] / "reports/legacy/output")
     Path(outputdir).mkdir(exist_ok=True, parents=True)
 
     File = {

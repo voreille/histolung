@@ -80,6 +80,8 @@ def tile_image(
     output_dir,
     docker_image='mmunozag/pyhist',
     user=None,
+    downsample=1,
+    mask_downsample=8,
     crossed_image=False,
 ):
     """
@@ -96,12 +98,13 @@ def tile_image(
 
     input_image = Path(input_image)
     command = [
-        "docker", "run", "-v", f"{input_image.parent}:/pyhist/images/", "-v",
-        f"{os.path.abspath(output_dir)}:/pyhist/output/", "-u", user, "-v",
-        "/etc/passwd:/etc/passwd", docker_image, "--method", "graph",
-        "--mask-downsample", "8", "--output-downsample", "2",
-        "--tilecross-downsample", "32", "--corners", "1111", "--borders",
-        "0000", "--percentage-bc", "1", "--k-const", "1000",
+        "docker", "run", "--rm", "-v", f"{input_image.parent}:/pyhist/images/",
+        "-v", f"{os.path.abspath(output_dir)}:/pyhist/output/", "-u", user,
+        "-v", "/etc/passwd:/etc/passwd", docker_image, "--method", "graph",
+        "--mask-downsample",
+        str(mask_downsample), "--output-downsample",
+        str(downsample), "--tilecross-downsample", "32", "--corners", "1111",
+        "--borders", "0000", "--percentage-bc", "1", "--k-const", "1000",
         "--minimum_segmentsize", "1000", "--info", "verbose",
         "--content-threshold", "0.2", "--patch-size", "256", "--save-patches",
         "--save-mask", "--save-tilecrossed-image", "--output",
