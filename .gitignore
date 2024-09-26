@@ -172,7 +172,7 @@ cython_debug/
 #.idea/
 
 .devcontainer/
-models/
+/models/
 .devcontainer_old/
 logs/
 reports/
