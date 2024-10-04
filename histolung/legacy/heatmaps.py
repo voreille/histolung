@@ -27,7 +27,16 @@ from histolung.legacy.datasets import Dataset_instance_MIL
 import pylab
 import click
 
+from PIL import Image
+
 thispath = Path(__file__).resolve()
+
+
+def save_image(arr, output_file="test.jpeg"):
+    im = (arr - arr.min()) / (arr.max() - arr.min()) * 255.0
+    im = Image.fromarray(im)
+    im = im.convert("RGB")
+    im.save(output_file)
 
 
 def smooth_heatmap(heatmap, sigma):
@@ -433,7 +442,7 @@ def main(wsi_name, sigma):
 
     torch.cuda.empty_cache()
 
-    pixel_size = int(224 / (downsample_factor))
+    pixel_size = int(224 / (downsample_factor)) * 2
 
     for d in dicts:
         x_cord_m = d['coord_x']
@@ -443,11 +452,16 @@ def main(wsi_name, sigma):
         y_cord_f = y_cord_m + pixel_size
         for x in range(x_cord_m, x_cord_f):
             for y in range(y_cord_m, y_cord_f):
-                mask_empty[x, y] = d['prob']
+                # mask_empty[x, y] = d['prob']
+                mask_empty[x, y] = 2.0
 
     mask_copy = mask_empty
 
     heatmap_np = np.uint8(mask_copy * 600)
+    arr = np.zeros_like(heatmap_np)
+    arr[heatmap_np != 0] = np.log(heatmap_np[heatmap_np != 0])
+    arr = arr + 2 * arr.min()
+    save_image(arr)
 
     heatmap_smooth_np = smooth_heatmap(heatmap_np, sigma)
     # heatmap_smooth_np[heatmap_smooth_np < 0.000002] = 0

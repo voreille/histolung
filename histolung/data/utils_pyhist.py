@@ -5,10 +5,10 @@ import numpy as np
 import cv2 as cv
 
 
-def compute_xy_coordinates(df):
+def compute_xy_coordinates(df, downsample_factor=1):
     df = df.copy()
-    widths = df[df["Row"] == 0]["Width"].values
-    heights = df[df["Column"] == 0]["Height"].values
+    widths = df[df["Row"] == 0]["Width"].values * downsample_factor
+    heights = df[df["Column"] == 0]["Height"].values * downsample_factor
 
     df["coord_x"] = df["Column"].apply(lambda index: np.sum(widths[:index]))
     df["coord_y"] = df["Row"].apply(lambda index: np.sum(heights[:index]))

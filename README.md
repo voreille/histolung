@@ -9,6 +9,7 @@ A short description of the project.
 ## TODO
 
 - [ ] Use HistoQC instead of PyHIST for tiles selection
+- [ ] Handle carefully magnifications fore each WSIsi
 - [ ] Add more unit tests for module Y.
 
 ## Project Organization

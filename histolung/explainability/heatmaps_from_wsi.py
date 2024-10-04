@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 import click
 import numpy as np
@@ -13,6 +14,7 @@ import cv2 as cv
 import seaborn as sns
 import scipy.ndimage as ndimage
 from natsort import natsorted
+from tqdm import tqdm
 
 from histolung.models.models import PretrainedModelLoader, MILModel
 from histolung.utils import yaml_load
@@ -31,6 +33,37 @@ def smooth_heatmap(heatmap, sigma):
     return np.array(heatmap_smooth)
 
 
+def eval_histogram_threshold(mask, thumb_data):
+
+    thumb_data_masked = np.ma.array(thumb_data, mask=np.logical_not(mask))
+    mean_thumb_data = thumb_data_masked.mean()
+    print(f"Mean image within the mask of: {mean_thumb_data}")
+
+    if mean_thumb_data <= 155:
+        upper_thr = 210
+        lower_thr = 35
+    elif (mean_thumb_data > 155 and mean_thumb_data <= 180):
+        upper_thr = 215
+        lower_thr = 40
+    elif (mean_thumb_data > 180):
+        upper_thr = 220
+        lower_thr = 45
+
+    else:
+        lower_thr = 40
+        upper_thr = 215
+
+    return lower_thr, upper_thr
+
+
+def get_histogram(img, lower, upper):
+
+    range_values = np.arange(lower, upper)
+    histo_val = np.histogram(img, bins=range_values)[0]
+
+    return histo_val
+
+
 def available_magnifications(mpp, level_downsamples):
     mpp = float(mpp)
     if (mpp < 0.26):
@@ -45,7 +78,10 @@ def available_magnifications(mpp, level_downsamples):
     return mags
 
 
-def filter_patches(wsi_path, pyhist_out_dir):
+def select_patches(wsi_path, pyhist_out_dir):
+    # dump_dir = pyhist_out_dir / "filtered_out_patches"
+    # dump_dir.mkdir()
+
     wsi_name = pyhist_out_dir.name
     binary_mask = cv.imread(str(pyhist_out_dir / f"segmented_{wsi_name}.png"))
     binary_mask[binary_mask == 255] = 1
@@ -54,8 +90,7 @@ def filter_patches(wsi_path, pyhist_out_dir):
         binary_mask, (int(mask_shape[1] * 0.5), int(mask_shape[0] * 0.5)))
     mask_shape = binary_mask.shape
 
-    slide = openslide.OpenSlide(
-        str(Path(datadir / filename.parent.stem / f"{filename.stem}.tif")))
+    slide = openslide.OpenSlide(str(wsi_path))
     thumbnail = slide.get_thumbnail((mask_shape[1], mask_shape[0]))
 
     thumbnail_data = np.array(thumbnail)
@@ -68,21 +103,15 @@ def filter_patches(wsi_path, pyhist_out_dir):
         f"Set an lower threshold of {lower} and upper {upper} to compute the histogram"
     )
 
-    patches_metadata = pd.read_csv(Path(filename / "tile_selection.tsv"),
-                                   sep='\t').set_index("Tile")
-
-    patches_path = [i for i in filename.rglob("*.png") if "tiles" in str(i)]
+    patches_dir = pyhist_out_dir / f"{wsi_name}_tiles"
+    patches_path = [i for i in patches_dir.glob("*.png")]
 
     patch = cv.imread(str(patches_path[0]))
     patch_shape = patch.shape
     total_pixels_patch = patch_shape[0] * patch_shape[1]
-    filtered_patches = []
-    names = []
-    all_row = []
-    all_col = []
+    selected_patches = []
 
-    for image_patch in tqdm(patches_path,
-                            desc=f"Filtering patches of {filename.stem}"):
+    for image_patch in tqdm(patches_path, desc=f"Filtering patches"):
 
         image = cv.imread(str(image_patch))
         gray_image = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
@@ -90,42 +119,12 @@ def filter_patches(wsi_path, pyhist_out_dir):
         histo = get_histogram(gray_image, lower, upper)
 
         total_pixels_in_range = np.sum(histo)
+        # selected_patches.append(image_patch)
 
         if (total_pixels_in_range > 0.6 * total_pixels_patch):
-            name = image_patch.stem
-            names.append(name)
-            all_row.append(patches_metadata.loc[name]['Row'])
-            all_col.append(patches_metadata.loc[name]['Column'])
-            filtered_patches.append(image_patch)
-
-    # Create .csv with metadata information of the filtered patches
-    outputdir_metadata = Path(filename /
-                              f"{filename.stem}_densely_filtered_metadata.csv")
-
-    file_metadata = {'patch_name': names, 'row': all_row, 'column': all_col}
-    df_metadata = pd.DataFrame.from_dict(file_metadata)
-    df_metadata.sort_values(by='patch_name',
-                            axis=0,
-                            ascending=True,
-                            inplace=True)
-    df_metadata.to_csv(outputdir_metadata, index=False)
-
-    # Create .csv with filtered parches path
-    outputdir_paths = Path(filename /
-                           f"{filename.stem}_densely_filtered_paths.csv")
-    file_path = {'filtered_patch_path': filtered_patches}
-    df_paths = pd.DataFrame.from_dict(file_path)
-    df_paths.sort_values(by='filtered_patch_path',
-                         axis=0,
-                         ascending=True,
-                         inplace=True)
-    df_paths.to_csv(outputdir_paths, index=False)
-
-    print(
-        f"Filtered patches: {len(filtered_patches)} from a total of {len(patches_path)}"
-    )
-    print(
-        f"Filtered .csv for {filename.stem} saved on {outputdir_paths.parent}")
+            selected_patches.append(image_patch)
+        # shutil.move(image_patch, dump_dir / image_patch.name)
+    return selected_patches
 
 
 @click.command()
@@ -161,8 +160,9 @@ def main(wsi_path, sigma):
     # elif mags[0] == 20:
     #     downsample = 1
 
-    # TODO: Fix magnification, here it's 20
-    downsample = 1
+    # TODO: Fix magnification, here it's 20 so
+    #       thus downsample 2 is 10x, I guess
+    downsample = 2
 
     # hardcoded from Lluis's code..
     downsample_factor = 32
@@ -177,10 +177,20 @@ def main(wsi_path, sigma):
         mask_path = binarize_mask(pyhist_output_dir / wsi_name /
                                   f"segmented_{wsi_name}.ppm")
 
-        filter_patches(pyhist_output_dir)
-    else:
-        print("output directory already exists, so tiles are not recomputed")
+        selected_patches = select_patches(wsi_path,
+                                          pyhist_output_dir / wsi_name)
+        # with open(pyhist_output_dir / wsi_name / "selected_patches.json",
+        #           "w") as f:
+        #     json.dump([str(p) for p in selected_patches])
+    # else:
 
+    # with open(pyhist_output_dir / wsi_name / "selected_patches.json",
+    #           "r") as f:
+    #     selected_patches = json.load(f)
+    # selected_patches = [Path(p) for p in selected_patches]
+    # print("output directory already exists, so tiles are not recomputed")
+
+    selected_patches = select_patches(wsi_path, pyhist_output_dir / wsi_name)
     mask_path = binarize_mask(pyhist_output_dir / wsi_name /
                               f"segmented_{wsi_name}.ppm")
 
@@ -188,20 +198,24 @@ def main(wsi_path, sigma):
         pyhist_output_dir / wsi_name / "tile_selection.tsv",
         sep="\t",
     )
-    tile_selection_df = compute_xy_coordinates(tile_selection_df)
+    tile_selection_df = compute_xy_coordinates(tile_selection_df,
+                                               downsample_factor=downsample)
 
     # mask_dir = pyhist_output_dir / wsi_name
     model_dir = base_path / "models" / "MIL" / "f_MIL_res34v2_v2_rumc_best_cosine_v3"
 
     # get all the patches path
-    patches = [f for f in sample_dir.glob("*.png")]
-    patches_selected = [f.name.split(".")[0] for f in patches]
+    # patches = [f for f in sample_dir.glob("*.png")]
+    # selected_patches = [f.name.split(".")[0] for f in patches]
 
     # format for dataloader
-    patches = [[str(f)] for f in patches]
+    patches = [[str(f)] for f in selected_patches]
+    selected_patches_name = [
+        str(f.name.split(".")[0]) for f in selected_patches
+    ]
 
     tile_selection_df = tile_selection_df[tile_selection_df['Tile'].isin(
-        patches_selected)]
+        selected_patches_name)]
 
     # TODO: Fix convention coordinate, here we invert x and y
     coords_x = tile_selection_df["coord_y"].values
@@ -456,10 +470,11 @@ def create_heatmap(mask_shape,
 
         mask_empty[x_cord_m:x_cord_f, y_cord_m:y_cord_f] = prob
 
-    heatmap_np = np.uint8(mask_empty * 600)
-    heatmap_smooth_np = smooth_heatmap(heatmap_np, sigma)
+    # heatmap_np = np.uint8(mask_empty * 6000)
+    # heatmap_smooth_np = smooth_heatmap(heatmap_np, sigma)
 
-    return heatmap_smooth_np
+    # return heatmap_smooth_np
+    return np.uint8(mask_empty * 6000)
 
 
 def save_results(wsi_name, final_prediction, groundtruth, output_dir):
