@@ -11,6 +11,14 @@ A short description of the project.
 - [ ] Use HistoQC instead of PyHIST for tiles selection
 - [ ] Handle carefully magnifications fore each WSIsi
 - [ ] Add more unit tests for module Y.
+- [ ] Add attention channel for multilabel output?
+- [ ] Check finetuning with batchnorm and dropout
+- [ ] Implement a wrapper for each feature extractor with finetuning logic
+- [ ] Implement multi-gpu support with torch.nn.DistributedDataParallel
+- [ ] make usage of the word tile or patch consistent
+- [ ] check the weight for BCEWithLogitsLoss
+- [ ] set the seeds!
+
 
 ## Project Organization
 

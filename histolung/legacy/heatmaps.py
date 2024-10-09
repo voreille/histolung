@@ -166,7 +166,7 @@ class MIL_model(torch.nn.Module):
 
         A = F.softmax(A, dim=1)
 
-        wsi_embedding = torch.mm(A, features_to_return)
+        wsi_embedding = torch.mm(A, features_to_return) # n_classes x hidden_dim
 
         if "NoChannel" in self.cfg.data_augmentation.featuresdir:
             # print("== Attention No Channel ==")

@@ -1,25 +1,20 @@
+import torch
 import torch.nn as nn
 
-class MILLoss(nn.Module):
-    def __init__(self, pos_weight=None):
-        """
-        A custom loss function for Multiple Instance Learning (MIL).
-        
-        Args:
-            pos_weight (torch.Tensor, optional): A weight of positive examples for unbalanced datasets.
-        """
-        super(MILLoss, self).__init__()
-        self.loss_fn = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
-    def forward(self, outputs, labels):
-        """
-        Forward pass for the MIL loss function.
+class FocalBCEWithLogitsLoss(nn.Module):
 
-        Args:
-            outputs (torch.Tensor): Model predictions.
-            labels (torch.Tensor): Ground truth labels.
+    def __init__(self, num_label=1, gamma=2):
+        super(FocalBCEWithLogitsLoss, self).__init__()
+        self.num_label = num_label
+        self.gamma = gamma
 
-        Returns:
-            torch.Tensor: Loss value.
-        """
-        return self.loss_fn(outputs, labels)
+    def forward(self, logits, targets):
+        l = logits.reshape(-1)
+        t = targets.reshape(-1)
+        p = torch.sigmoid(l)
+        p = torch.where(t >= 0.5, p, 1 - p)
+        logp = -torch.log(torch.clamp(p, 1e-4, 1 - 1e-4))
+        loss = logp * ((1 - p)**self.gamma)
+        loss = self.num_label * loss.mean()
+        return loss
