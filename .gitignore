@@ -175,4 +175,4 @@ cython_debug/
 /models/
 .devcontainer_old/
 logs/
-reports/
+reports/notebooks/explo_dev_stuffs.ipynb
