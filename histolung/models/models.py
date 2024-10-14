@@ -1,222 +1,244 @@
-from collections.abc import Iterable
+from typing import Union
+from pathlib import Path
+import yaml
 
 from torch import nn
-import torchvision.models as models
 import torch
-import torch.nn.functional as F
+import torchvision.models as models
 
 
-class PretrainedModelLoader:
+def load_pretrained_model(model_name: str, keep_last_layer=False):
+    """Loads the specified pre-trained model and returns the model and input features."""
+    model_dict = {
+        "resnet50": (models.resnet50, models.ResNet50_Weights.DEFAULT, 224),
+        "resnet34": (models.resnet34, models.ResNet34_Weights.DEFAULT, 224),
+        "resnet101": (models.resnet101, models.ResNet101_Weights.DEFAULT, 224),
+        "convnext": (models.convnext_small, 'DEFAULT', 224),
+        "swin": (models.swin_v2_t, models.Swin_V2_T_Weights.DEFAULT, 224),
+        "efficient": (models.efficientnet_b0, 'DEFAULT', 224),
+    }
+
+    if model_name.lower() not in model_dict:
+        raise ValueError(
+            f"Invalid model name: {model_name}. Choose from {list(model_dict.keys())}"
+        )
+
+    model_class, weights, image_size = model_dict[model_name.lower()]
+    model = model_class(weights=weights)
+
+    # Extract input features from the appropriate layer before modifying the last layer
+    feature_dim = model.fc.in_features if hasattr(
+        model, 'fc') else model.classifier[-1].in_features
+
+    # Remove the last layer if keep_last_layer is False
+    if not keep_last_layer:
+        if hasattr(model, 'fc'):  # For models like ResNet
+            model.fc = nn.Identity()  # Replaces the fully connected layer
+        elif hasattr(model,
+                     'classifier'):  # For models like EfficientNet, ConvNext
+            model.classifier = nn.Identity()
+
+    return model, feature_dim, image_size
+
+
+class FeatureExtractor(nn.Module):
 
     def __init__(self,
                  model_name: str,
-                 num_classes: int,
-                 freeze=False,
-                 num_freezed_layers=0,
-                 dropout=0.0,
-                 embedding_bool=False,
-                 pool_algorithm=None):
-        self.model_name = model_name
+                 keep_last_layer=False,
+                 freeze_weights=True,
+                 fine_tune_last_n_layers=0):
+        super(FeatureExtractor, self).__init__()
+        self.model, self.feature_dim, self.image_size = load_pretrained_model(
+            model_name=model_name, keep_last_layer=keep_last_layer)
+
+        # Freeze all layers by default if freeze_weights is set to True
+        if freeze_weights:
+            self.freeze_all_layers()
+
+        # Fine-tune the last `n` layers if specified
+        if fine_tune_last_n_layers > 0:
+            self.unfreeze_last_n_layers(fine_tune_last_n_layers)
+
+    def freeze_all_layers(self):
+        """
+        Freezes all layers in the feature extractor by setting requires_grad to False.
+        """
+        for param in self.model.parameters():
+            param.requires_grad = False
+
+    def unfreeze_last_n_layers(self, n: int):
+        """
+        Unfreezes the last `n` layers of the feature extractor, based on its architecture.
+        
+        Args:
+            n (int): Number of layers from the end to unfreeze.
+        """
+        # This is an architecture-specific fine-tuning method.
+        # Unfreeze the last `n` layers based on the architecture.
+        total_layers = list(self.model.parameters())
+        for param in total_layers[-n:]:
+            param.requires_grad = True
+
+        # Additionally, handle specific types of layers like BatchNorm
+        for layer in self.model.modules():
+            if isinstance(layer, nn.BatchNorm2d) and not any(
+                    p.requires_grad for p in layer.parameters()):
+                layer.eval()  # Keep BatchNorm in eval mode for frozen layers
+
+    def forward(self, x):
+        return self.model(x)
+
+
+# Example of attention-based aggregator
+class BaseAggregator(nn.Module):
+
+    def __init__(self, input_dim, hidden_dim, num_classes=2, dropout=0.2):
+        super(BaseAggregator, self).__init__()
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
         self.num_classes = num_classes
-        self.num_freezed_layers = num_freezed_layers
         self.dropout = dropout
-        self.embedding_bool = embedding_bool
-        self.pool_algorithm = pool_algorithm
 
-        # Load the appropriate pre-trained model and its input feature size
-        (self.net, self.input_features,
-         self.resize_param) = self.load_pretrained_model()
 
-    def load_pretrained_model(self):
-        """Loads the pre-trained model based on the model name and returns it."""
-        model_dict = {
-            "resnet50":
-            (models.resnet50, models.ResNet50_Weights.DEFAULT, 224),
-            "resnet34":
-            (models.resnet34, models.ResNet34_Weights.DEFAULT, 224),
-            "resnet101":
-            (models.resnet101, models.ResNet101_Weights.DEFAULT, 224),
-            "convnext": (models.convnext_small, 'DEFAULT', 224),
-            "swin": (models.swin_v2_t, models.Swin_V2_T_Weights.DEFAULT, 224),
-            "efficient": (models.efficientnet_b0, 'DEFAULT', 224),
-        }
+class AttentionAggregator(BaseAggregator):
 
-        if self.model_name.lower() not in model_dict:
-            raise ValueError(
-                f"Invalid model name: {self.model_name}. Choose from {list(model_dict.keys())}"
-            )
+    def __init__(self, input_dim, hidden_dim, num_classes=2, dropout=0.2):
+        super(AttentionAggregator, self).__init__(
+            input_dim,
+            hidden_dim,
+            num_classes=num_classes,
+            dropout=dropout,
+        )
+        self.projection_layer = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.Dropout(p=dropout),
+        )
+        self.pre_fc_layer = nn.Sequential(
+            nn.Linear(hidden_dim * num_classes, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(p=dropout),
+        )
+        self.attention = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.Tanh(),
+            nn.Linear(hidden_dim, num_classes),
+            nn.Softmax(dim=0),
+        )
+        self.fc = nn.Linear(
+            in_features=hidden_dim,
+            out_features=num_classes,
+        )
 
-        model_class, weights, resize_param = model_dict[
-            self.model_name.lower()]
-        model = model_class(weights=weights)
+    def forward(self, x):
+        x = self.projection_layer(x)
+        attention = self.attention(x)
+        attention = torch.transpose(attention, 1, 0)
+        aggregated_embedding = torch.mm(attention, x)
+        aggregated_embedding = aggregated_embedding.view(
+            -1,
+            self.hidden_dim * self.num_classes,
+        )
+        output = self.pre_fc_layer(aggregated_embedding)
+        output = self.fc(output)
+        output = torch.squeeze(output)
 
-        # Extract input features from the appropriate layer
-        input_features = self.get_input_features(model)
+        return output, attention
 
-        return model, input_features, resize_param
 
-    def get_input_features(self, model):
-        """Extracts the input features based on the model's architecture."""
-        if hasattr(model, 'fc'):
-            return model.fc.in_features
-        elif hasattr(model, 'classifier'):
-            return model.classifier[-1].in_features
-        elif hasattr(model, 'head'):
-            return model.head.in_features
-        else:
-            raise AttributeError(
-                "The model does not have a recognized fully connected or classifier layer."
-            )
+# Example of mean pooling aggregator
+class MeanPoolingAggregator(nn.Module):
 
-    @staticmethod
-    def set_parameter_requires_grad(model, num_freezed_layers):
-        """Freezes the layers of the model based on the number of layers to freeze."""
-        for k, child in enumerate(model.children()):
-            if k == num_freezed_layers:
-                break
-            for param in child.parameters():
-                param.requires_grad = False
+    def __init__(self):
+        super(MeanPoolingAggregator, self).__init__()
+
+    def forward(self, embeddings):
+        return torch.mean(embeddings,
+                          dim=0), None  # No attention weights to return
 
 
 class MILModel(nn.Module):
 
-    def __init__(self, model_loader: PretrainedModelLoader,
-                 hidden_space_len: int, cfg):
+    def __init__(
+        self,
+        feature_extractor: FeatureExtractor,
+        aggregator: BaseAggregator,
+    ):
         super(MILModel, self).__init__()
-        self.model_loader = model_loader
-        self.hidden_space_len = hidden_space_len
-        self.cfg = cfg
+        self.num_classes = aggregator.num_classes
+        self.feature_dim = feature_extractor.feature_dim
 
-        # TODO: change this self.net and self.conv_layers
-        #       does it even make sense to have the two?
-        self.net = self.model_loader.net
+        self.feature_extractor = feature_extractor
+        self.aggregator = aggregator
 
-        # Get the pre-trained conv layers
-        self.conv_layers = nn.Sequential(
-            *list(self.model_loader.net.children())[:-1])
+    @staticmethod
+    def from_config(cfg: Union[dict, Path, str]):
+        """
+        Builds a MILModel instance from a configuration dictionary or YAML file.
+        
+        Args:
+            cfg (Union[dict, Path, str]): Configuration dictionary or path to a YAML file.
+        
+        Returns:
+            MILModel: Configured MILModel instance.
+        """
+        if isinstance(cfg, Path) or isinstance(cfg, str):
+            with open(cfg, 'r') as file:
+                cfg = yaml.safe_load(file)
 
-        # Parallelize on multiple GPUs if available
-        if torch.cuda.device_count() > 1:
-            self.conv_layers = nn.DataParallel(self.conv_layers,
-                                               device_ids=[0])
+        # Load parameters from config
+        model_cfg = cfg['model']
 
-        self.embedding_bool = self.model_loader.embedding_bool
-        self.fc_input_features = self.model_loader.input_features
-        self.num_classes = self.model_loader.num_classes
-        self.pool_algorithm = self.model_loader.pool_algorithm
+        # Model-specific parameters
+        feature_extractor_name = model_cfg['feature_extractor']
+        freeze_weights = model_cfg['freeze_weights']
+        keep_last_layer = model_cfg['keep_last_layer']
+        aggregator_type = model_cfg['aggregator']
+        projection_dim = model_cfg['projection_dim']
+        num_classes = model_cfg['num_classes']
 
-        self.E = self.hidden_space_len
-        self.K = self.num_classes
-        self.D = self.hidden_space_len
-        if self.embedding_bool:
-            self.setup_embedding_layers()
+        # Instantiate the feature extractor
+        feature_extractor = FeatureExtractor(model_name=feature_extractor_name,
+                                             keep_last_layer=keep_last_layer,
+                                             freeze_weights=freeze_weights)
+
+        # Instantiate the aggregator
+        if aggregator_type == 'attention':
+            aggregator = AttentionAggregator(
+                input_dim=feature_extractor.feature_dim,
+                hidden_dim=projection_dim,
+                num_classes=num_classes)
         else:
-            self.fc = nn.Linear(in_features=self.fc_input_features,
-                                out_features=self.num_classes)
+            aggregator = MeanPoolingAggregator()
 
-        self.embedding_fc = torch.nn.Linear(self.E, self.K)
+        # Build the MILModel instance
+        model = MILModel(feature_extractor=feature_extractor,
+                         aggregator=aggregator)
 
-        if self.pool_algorithm == "attention":
-            self.setup_attention_pooling()
-
-        self.dropout = nn.Dropout(p=self.model_loader.dropout)
-
-        # self.relu = torch.nn.ReLU()
-        # self.activation = self.relu
-        self.activation = torch.nn.ReLU()
-        self.LayerNorm = torch.nn.LayerNorm(self.E * self.K, eps=1e-5)
-
-    def setup_embedding_layers(self):
-        """Sets up embedding layers based on the selected model."""
-
-        self.embedding = nn.Linear(in_features=self.fc_input_features,
-                                   out_features=self.E)
-
-        # REMOVE: it's there from old code
-        self.post_embedding = nn.Linear(in_features=self.E,
-                                        out_features=self.E)
-
-    def setup_attention_pooling(self):
-        """Sets up attention pooling layers."""
-        self.attention = nn.Sequential(nn.Linear(self.E, self.D), nn.Tanh(),
-                                       nn.Linear(self.D, self.K))
-        if "AChannel" in self.cfg.data_augmentation.featuresdir:
-            self.attention_channel = nn.Sequential(nn.Linear(self.E, self.D),
-                                                   nn.Tanh(),
-                                                   nn.Linear(self.D, 1))
-
-        self.embedding_before_fc = nn.Linear(self.E * self.K, self.E)
+        return model
 
     def forward(self, x):
         """
-        Forward pass for the MIL model using precomputed embeddings.
-
-        Args:
-            x (torch.Tensor): The input tensor containing the embeddings of the patches 
-                            for a WSI, with shape (num_patches, embedding_dim). If 
-                            `self.embedding_bool` is True, `x` will be passed through 
-                            additional embedding layers; otherwise, it will be used 
-                            directly in the attention mechanism.
-
-        Returns:
-            Y_prob (torch.Tensor): The output probabilities for the WSI, representing the 
-                                predicted class distribution, with shape (num_classes,).
-            A (torch.Tensor): The attention weights for each patch, used for aggregating 
-                            the patch-level embeddings into a WSI-level representation, 
-                            with shape (num_patches,).
+        Forward pass for MIL model.
+        Embedding extraction and aggregation are separated for memory efficiency.
         
-        Behavior:
-        - If `self.embedding_bool` is True, the input `x` will first be passed through 
-        an additional embedding layer (`self.embedding`) before further processing.
-        - The model then applies attention pooling over the embeddings or post-embedding 
-        features using the learned attention mechanism (`self.attention`).
-        - The attention weights are computed and used to aggregate the patch embeddings 
-        into a single WSI-level embedding (`wsi_embedding`).
-        - If the "AChannel" option is enabled in the data augmentation configuration, 
-        an additional channel-specific attention mechanism is applied to the WSI-level 
-        embedding.
-        - The resulting WSI embedding is passed through a fully connected layer and 
-        activation function to produce the final prediction probabilities.
+        Args:
+            x (torch.Tensor): Input embeddings.
+        
+        Returns:
+            torch.Tensor: Prediction probabilities.
         """
-        x = x.view(-1, self.fc_input_features)
-
-        if self.embedding_bool:
-            embedding_layer = self.embedding(x)
-            features_to_return = embedding_layer
-
-            # REMOVE: it's there from old code
-            embedding_layer = self.dropout(embedding_layer)
-        else:
-            features_to_return = x
-
-        # Attention pooling
-        A = self.attention(features_to_return)
-        A = torch.transpose(A, 1, 0)
-        A = F.softmax(A, dim=1)
-
-        wsi_embedding = torch.mm(A, features_to_return)
-
-        if "AChannel" in self.cfg.data_augmentation.featuresdir:
-            attention_channel = self.attention_channel(wsi_embedding)
-            attention_channel = torch.transpose(attention_channel, 1, 0)
-            attention_channel = F.softmax(attention_channel, dim=1)
-            cls_img = torch.mm(attention_channel, wsi_embedding)
-        else:
-            cls_img = wsi_embedding.view(-1, self.E * self.K)
-            cls_img = self.embedding_before_fc(cls_img)
-
-        cls_img = self.activation(cls_img)
-        cls_img = self.dropout(cls_img)
-
-        Y_prob = self.embedding_fc(cls_img)
-        Y_prob = torch.squeeze(Y_prob)
-
-        return Y_prob, A
+        return self.aggregator(x)
 
     def embed_with_dataloader(self, dataloader):
         """
-        Forward pass for a WSI using a DataLoader.
-        This method processes the WSI in batches using a DataLoader and aggregates the embeddings.
+        Processes a WSI using a DataLoader, extracting embeddings in batches.
+        
+        Args:
+            dataloader (DataLoader): DataLoader for batch-wise processing of patches.
+        
+        Returns:
+            torch.Tensor: Extracted embeddings.
         """
         all_embeddings = []
         self.eval()  # Switch to evaluation mode
@@ -225,16 +247,24 @@ class MILModel(nn.Module):
             for batch_patches in dataloader:
                 batch_patches = batch_patches.to(
                     next(self.parameters()).device)
-                embeddings = self.conv_layers(batch_patches)
-                embeddings = embeddings.view(-1, self.hidden_space_len)
+                embeddings = self.feature_extractor(batch_patches)
                 all_embeddings.append(embeddings)
 
-        all_embeddings = torch.cat(all_embeddings, dim=0)
-        return all_embeddings
+        return torch.cat(all_embeddings, dim=0)
 
     def process_dataloader(self, dataloader):
-        pred_scores, attentions = self.forward(
+        """
+        Processes the WSI by first embedding the patches and then aggregating.
+        
+        Args:
+            dataloader (DataLoader): DataLoader for batch-wise processing.
+        
+        Returns:
+            numpy.ndarray: Prediction scores.
+        """
+        pred_scores, attention = self.forward(
             self.embed_with_dataloader(dataloader))
-        pred_scores = pred_scores.detach().cpu().numpy()
-        attentions = attentions.detach().cpu().numpy()
-        return pred_scores, attentions
+        return (
+            pred_scores.detach().cpu().numpy(),
+            attention.detach().cpu().numpy(),
+        )

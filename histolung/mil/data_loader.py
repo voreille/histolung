@@ -1,7 +1,7 @@
-import numpy as np
 import torch
 from torch.utils.data import Dataset
 import pyspng
+import h5py
 
 
 class WSIDataset(Dataset):
@@ -75,3 +75,59 @@ class TileDataset(Dataset):
             image = self.preprocess(image).type(torch.FloatTensor)
 
         return image
+
+
+class HDF5EmbeddingDataset(Dataset):
+
+    def __init__(self, hdf5_path, label_map, wsi_ids):
+        """
+        Dataset for iterating through embeddings stored in an HDF5 file.
+        
+        Args:
+            hdf5_path (str or Path): Path to the HDF5 file containing the embeddings.
+            label_map (dict): Dictionary mapping `wsi_id` to class labels (int).
+            wsi_ids (list): List of WSI IDs to iterate over.
+        """
+        self.hdf5_path = hdf5_path
+        self.label_map = label_map  # Mapping between wsi_id and label
+        self.wsi_ids = wsi_ids  # List of WSI IDs
+        self.hdf5_file = None  # Will hold the opened HDF5 file handle
+
+    def __len__(self):
+        """Return the number of WSIs in the dataset."""
+        return len(self.wsi_ids)
+
+    def open_hdf5(self):
+        """Open the HDF5 file if not already opened."""
+        if self.hdf5_file is None:
+            self.hdf5_file = h5py.File(self.hdf5_path, 'r')
+
+    def close_hdf5(self):
+        """Close the HDF5 file if it is open."""
+        if self.hdf5_file is not None:
+            self.hdf5_file.close()
+            self.hdf5_file = None
+
+    def __getitem__(self, idx):
+        """
+        Fetch the embeddings and corresponding label for the WSI at index `idx`.
+        
+        Args:
+            idx (int): Index of the WSI.
+        
+        Returns:
+            tuple: (embeddings, label)
+                   embeddings (torch.Tensor): Embeddings for the WSI.
+                   label (int): The class label for the WSI.
+        """
+        self.open_hdf5()  # Ensure the HDF5 file is open
+
+        wsi_id = self.wsi_ids[idx]
+        embeddings = torch.tensor(self.hdf5_file['embeddings'][wsi_id][:])
+        label = torch.tensor(self.label_map[wsi_id], dtype=torch.long)
+
+        return embeddings, label
+
+    def __del__(self):
+        """Ensure the HDF5 file is closed when the dataset object is deleted."""
+        self.close_hdf5()

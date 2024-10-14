@@ -4,7 +4,7 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 
-from histolung.models.models import MILModel, PretrainedModelLoader
+from histolung.models.models_legacy import MILModel, PretrainedModelLoader
 from histolung.utils import yaml_load
 
 

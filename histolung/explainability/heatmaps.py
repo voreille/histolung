@@ -14,7 +14,7 @@ import seaborn as sns
 import scipy.ndimage as ndimage
 from natsort import natsorted
 
-from histolung.models.models import PretrainedModelLoader, MILModel
+from histolung.models.models_legacy import PretrainedModelLoader, MILModel
 from histolung.utils import yaml_load
 from histolung.legacy.datasets import Dataset_instance_MIL
 

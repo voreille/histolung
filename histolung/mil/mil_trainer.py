@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 
-from histolung.models.models_refactor import MILModel
+from histolung.models.models import MILModel
 from histolung.mil.data_loader import TileDataset
 from histolung.mil.data_augmentation import get_augmentations_pipeline
 
@@ -49,6 +49,18 @@ class MILTrainer:
         self.tile_paths_by_wsi = tile_paths_by_wsi
         self.num_classes = model.num_classes
 
+    def get_tile_dataloader(self, tile_paths):
+        tile_dataset = TileDataset(
+            tile_paths,
+            augmentation=get_augmentations_pipeline(prob=0.5),
+            preprocess=self.tile_preprocess,
+        )
+        return DataLoader(tile_dataset,
+                          batch_size=1024,
+                          shuffle=False,
+                          num_workers=32,
+                          pin_memory=True)
+
     def train_epoch(self):
         """
         Executes a single training epoch and returns the average loss, supporting multi-GPU.
@@ -76,18 +88,8 @@ class MILTrainer:
                 # Create DataLoader for the patches of the current WSI
                 # we call get_augmentations_pipeline once per each WSI
                 # to have the same augmentation for the whole WSI.
-                tile_dataset = TileDataset(
-                    self.tile_paths_by_wsi[wsi_id],
-                    augmentation=get_augmentations_pipeline(prob=0.5),
-                    preprocess=self.tile_preprocess,
-                )
-                tile_loader = DataLoader(
-                    tile_dataset,
-                    batch_size=1024,
-                    shuffle=False,
-                    num_workers=32,
-                    pin_memory=True,
-                )
+                tile_loader = self.get_tile_dataloader(
+                    self.tile_paths_by_wsi[wsi_id])
 
                 embeddings = self.model.embed_with_dataloader(tile_loader)
 

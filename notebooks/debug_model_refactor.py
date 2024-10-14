@@ -6,7 +6,7 @@ from torchvision import transforms
 
 from histolung.legacy.datasets import Dataset_instance_MIL
 from histolung.utils import yaml_load
-from histolung.models.models_refactor import load_pretrained_model, MILModel, AttentionAggregator
+from histolung.models.models import load_pretrained_model, MILModel, AttentionAggregator
 
 
 def set_dataloader(
