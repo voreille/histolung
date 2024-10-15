@@ -15,17 +15,18 @@ from histolung.utils import yaml_load
 
 project_dir = Path(__file__).parents[2]
 # Set up logging to a file
-log_file = project_dir / "logs/data/embedding_process.log"
+model_path = project_dir / "models/MIL/uni"
+log_file = project_dir / "logs/data/embedding_process_uni.log"
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler(log_file),  # Log to a file
-    ]
-)
+    ])
 
 DEBUG = False  # Set to True to limit processing to 4 WSIs for testing
 MAX_WSI_DEBUG = 4  # Limit for WSIs when debugging
+
 
 def load_metadata():
     """
@@ -103,7 +104,8 @@ def store_all_embeddings(
     wsi_count = 0  # Track number of WSIs processed
     # Create or open the HDF5 file
     with h5py.File(output_file, 'w') as hdf5_file:
-        embeddings_group = hdf5_file.create_group('embeddings')  # Optional group
+        embeddings_group = hdf5_file.create_group(
+            'embeddings')  # Optional group
         for wsi_ids, _ in tqdm(wsi_dataloader, desc="Processing WSIs"):
             for wsi_id in wsi_ids:
                 logging.info(f"Processing WSI {wsi_id}")
@@ -122,7 +124,8 @@ def store_all_embeddings(
                 embeddings = model.embed_with_dataloader(tile_loader)
 
                 # Store the embeddings in the HDF5 file under the WSI ID
-                embeddings_group.create_dataset(wsi_id, data=embeddings.cpu().numpy())
+                embeddings_group.create_dataset(wsi_id,
+                                                data=embeddings.cpu().numpy())
 
                 logging.info(f"Stored embeddings for WSI {wsi_id}")
 
@@ -131,7 +134,9 @@ def store_all_embeddings(
 
                 # If in debug mode and max WSI limit reached, stop early
                 if DEBUG and wsi_count >= MAX_WSI_DEBUG:
-                    logging.info(f"DEBUG mode: Stopped after processing {wsi_count} WSIs.")
+                    logging.info(
+                        f"DEBUG mode: Stopped after processing {wsi_count} WSIs."
+                    )
                     break
 
             # Stop the outer loop if DEBUG mode limit is reached
@@ -144,12 +149,9 @@ def store_all_embeddings(
 
 
 if __name__ == "__main__":
-    # Example usage
-    model_path = project_dir / "models/MIL/first"
-
     # Store embeddings for all WSIs
-    device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(f"Device used: {device}")
-    
+
     # Start the embedding process and time it
     store_all_embeddings(model_path, device=device)

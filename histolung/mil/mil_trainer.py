@@ -1,65 +1,43 @@
 import logging
-from typing import Dict
 
-import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.optim import Optimizer
+import numpy as np
 from torch.utils.data import DataLoader
 
+from histolung.mil.data_loader import TileDataset, HDF5EmbeddingDataset
 from histolung.models.models import MILModel
-from histolung.mil.data_loader import TileDataset
-from histolung.mil.data_augmentation import get_augmentations_pipeline
 
 # Set up logging
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
 
-class MILTrainer:
+class BaseMILTrainer:
+    """
+    BaseMILTrainer is a base class that provides common logic for the training loop, 
+    validation, and optimizer steps. It is meant to be inherited by specific trainers 
+    that handle different types of data inputs, such as raw tiles or precomputed embeddings.
+    
+    This class handles the shared training logic, including:
+    - Backpropagation
+    - Loss calculation
+    - Optimizer step
+    - Validation
+    """
 
-    def __init__(
-        self,
-        model: MILModel,
-        dataloaders: Dict[str, DataLoader],
-        optimizer: Optimizer,
-        loss_fn,
-        tile_paths_by_wsi=None,
-        device='cuda',
-        tile_preprocess=None,
-        tile_augmentation=None,
-    ):
-        """
-        Initializes the MILTrainer class.
-        
-        Args:
-            model (MILModel): MIL model to be trained.
-            dataloaders (dict): A dictionary containing 'train' and 'val' DataLoaders.
-            optimizer (Optimizer): Optimizer for model training.
-            loss_fn: Loss function used for training (e.g., CrossEntropyLoss).
-            device (str): Device to train the model on ('cuda' or 'cpu').
-        """
+    def __init__(self,
+                 model: MILModel,
+                 dataloaders: dict[str, DataLoader],
+                 optimizer,
+                 loss_fn,
+                 device='cuda'):
         self.model = model.to(device)
-        self.dataloaders = dataloaders
         self.optimizer = optimizer
         self.loss_fn = loss_fn
         self.device = device
-        self.tile_preprocess = tile_preprocess
-        self.tile_augmentation = tile_augmentation
-        self.tile_paths_by_wsi = tile_paths_by_wsi
+        self.dataloaders = dataloaders
         self.num_classes = model.num_classes
-
-    def get_tile_dataloader(self, tile_paths):
-        tile_dataset = TileDataset(
-            tile_paths,
-            augmentation=get_augmentations_pipeline(prob=0.5),
-            preprocess=self.tile_preprocess,
-        )
-        return DataLoader(tile_dataset,
-                          batch_size=1024,
-                          shuffle=False,
-                          num_workers=32,
-                          pin_memory=True)
 
     def train_epoch(self):
         """
@@ -88,10 +66,8 @@ class MILTrainer:
                 # Create DataLoader for the patches of the current WSI
                 # we call get_augmentations_pipeline once per each WSI
                 # to have the same augmentation for the whole WSI.
-                tile_loader = self.get_tile_dataloader(
-                    self.tile_paths_by_wsi[wsi_id])
 
-                embeddings = self.model.embed_with_dataloader(tile_loader)
+                embeddings = self.get_embeddings(wsi_id)
 
                 aggregated_output, _ = self.model(embeddings)
 
@@ -133,22 +109,24 @@ class MILTrainer:
 
         logging.info("Starting validation epoch...")
         with torch.no_grad():
-            for batch_idx, (batch_patches,
-                            labels) in enumerate(self.dataloaders['val']):
+            for batch_idx, batch in enumerate(self.dataloaders['val']):
+                wsi_ids, labels = batch
                 logging.info(
                     f"Processing validation batch {batch_idx + 1}/{len(self.dataloaders['val'])}"
                 )
 
-                batch_patches, labels = batch_patches.to(
-                    self.device), labels.to(self.device)
+                labels = labels.to(self.device)
 
                 # Forward pass: embeddings from patches, then predictions
-                embeddings = self.model.embed_with_dataloader(batch_patches)
-                outputs, _ = self.model(embeddings)
+                batch_outputs = []
+                for wsi_id in enumerate(wsi_ids):
+                    embeddings = self.get_embeddings(wsi_id)
+                    outputs, _ = self.model(embeddings)
+                    batch_outputs.append(outputs)
 
                 # Compute loss
-                loss = self.loss_fn(outputs, labels)
-                running_loss += loss.item() * batch_patches.size(0)
+                loss = self.loss_fn(batch_outputs, labels)
+                running_loss += loss.item() * batch_outputs.size(0)
 
                 # Collect predictions and labels
                 all_preds.append(outputs.cpu())
@@ -186,37 +164,114 @@ class MILTrainer:
                 f"Epoch {epoch + 1} completed. Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}"
             )
 
-    def evaluate(self, dataloader: DataLoader):
+    def get_embeddings(self, wsi_id):
         """
-        Evaluates the MIL model on a test dataset.
+        To be implemented by subclasses for specific data extraction logic.
+        Each subclass defines how to get the embeddings and labels.
         
         Args:
-            dataloader (DataLoader): DataLoader for the test set.
+            batch_data (tuple): Batch data from DataLoader.
         
         Returns:
-            tuple: Predicted scores and, if applicable, attention weights.
+            tuple: Embeddings and labels.
         """
-        self.model.eval()
-        all_preds = []
-        all_attentions = []
+        raise NotImplementedError
 
-        logging.info("Starting evaluation...")
-        with torch.no_grad():
-            for batch_idx, batch_patches in enumerate(dataloader):
-                logging.info(
-                    f"Processing evaluation batch {batch_idx + 1}/{len(dataloader)}"
-                )
 
-                batch_patches = batch_patches.to(self.device)
+class TileMILTrainer(BaseMILTrainer):
+    """
+    TileMILTrainer is designed to train MIL models directly from raw tile data.
+    It computes embeddings for each tile on-the-fly and applies augmentation and preprocessing.
+    
+    **Note:** This trainer is kept for completeness but is not recommended for practical 
+    use due to the long training times when computing embeddings dynamically. It's more
+    efficient to use `EmbeddingMILTrainer`, which works with precomputed embeddings.
+    """
 
-                # Forward pass: embeddings from patches, then predictions
-                embeddings = self.model.embed_with_dataloader(batch_patches)
-                preds, attention = self.model(embeddings)
+    def __init__(self,
+                 model,
+                 dataloaders,
+                 optimizer,
+                 loss_fn,
+                 device='cuda',
+                 tile_preprocess=None,
+                 tile_paths_by_wsi=None,
+                 tile_augmentation=None):
+        super().__init__(model, dataloaders, optimizer, loss_fn, device)
+        self.dataloaders = dataloaders
+        self.tile_preprocess = tile_preprocess
+        self.tile_augmentation = tile_augmentation
+        if tile_paths_by_wsi is None:
+            raise RuntimeError(
+                "You must provide a mapping to the path of the patches"
+                "in the tile_paths_by_wsi kwargs")
+        else:
+            self.tile_paths_by_wsi = tile_paths_by_wsi
 
-                all_preds.append(preds.cpu().numpy())
-                if attention is not None:
-                    all_attentions.append(attention.cpu().numpy())
+    def get_embeddings(self, wsi_id):
+        """
+        Extracts the embeddings for a batch by computing them dynamically from raw tile data.
+        
+        Args:
+            batch_data (tuple): Tuple containing (wsi_id, tile_paths, label).
+        
+        Returns:
+            tuple: Embeddings for the WSI and its label.
+        """
+        tile_paths = self.tile_paths_by_wsi[wsi_id]
+        tile_loader = self.create_tile_loader(tile_paths)
+        embeddings = self.model.embed_with_dataloader(tile_loader)
+        return embeddings
 
-        logging.info("Evaluation completed.")
-        return np.concatenate(all_preds), (np.concatenate(all_attentions)
-                                           if all_attentions else None)
+    def create_tile_loader(self, tile_paths):
+        """
+        Create a DataLoader for the tiles of a given WSI.
+        
+        Args:
+            tile_paths (list): List of file paths for WSI tiles.
+        
+        Returns:
+            DataLoader: DataLoader for the WSI tiles.
+        """
+        tile_dataset = TileDataset(
+            tile_paths,
+            augmentation=self.tile_augmentation,
+            preprocess=self.tile_preprocess,
+        )
+        return DataLoader(tile_dataset,
+                          batch_size=32,
+                          shuffle=False,
+                          num_workers=4)
+
+
+class EmbeddingMILTrainer(BaseMILTrainer):
+    """
+    EmbeddingMILTrainer is optimized for training MIL models using precomputed embeddings. 
+    It skips tile augmentation and preprocessing, and instead loads embeddings from an HDF5 
+    file or other storage. This approach is significantly faster and recommended for practical 
+    training purposes.
+    """
+
+    def __init__(self,
+                 model,
+                 dataloaders,
+                 optimizer,
+                 loss_fn,
+                 device='cuda',
+                 hdf5_file=None):
+        super().__init__(model, optimizer, loss_fn, device)
+        self.dataloaders = dataloaders
+        self.hdf5_file = hdf5_file
+
+    def get_embeddings(self, wsi_id):
+        """
+        Loads the precomputed embeddings for a batch from the HDF5 file.
+        
+        Args:
+            batch_data (tuple): Tuple containing (wsi_id, label).
+        
+        Returns:
+            tuple: Embeddings for the WSI and its label.
+        """
+        embeddings = torch.tensor(self.hdf5_file['embeddings'][wsi_id][:])
+        return embeddings

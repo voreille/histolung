@@ -4,7 +4,7 @@ import logging
 import torch
 
 from histolung.models.models import MILModel
-from histolung.mil.mil_trainer_refactor import TileMILTrainer
+from histolung.mil.mil_trainer import TileMILTrainer
 from histolung.mil.utils import (get_preprocessing, get_wsi_dataloaders,
                                  get_loss_function, get_optimizer,
                                  load_metadata, split_by_fold)
@@ -87,5 +87,5 @@ def main(model_dir=None):
 
 
 if __name__ == "__main__":
-    model_dir = project_dir / "models/MIL/first/"
+    model_dir = project_dir / "models/MIL/uni/"
     main(model_dir)

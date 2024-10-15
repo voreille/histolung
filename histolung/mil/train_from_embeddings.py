@@ -7,7 +7,7 @@ import h5py
 import pandas as pd
 
 from histolung.models.models import MILModel
-from histolung.mil.mil_trainer import MILTrainer
+from histolung.mil.mil_trainer import TileMILTrainer
 from histolung.mil.data_loader import WSIDataset
 from histolung.mil.utils import get_wsi_dataloaders
 
@@ -69,7 +69,7 @@ def main():
         loss_fn = torch.nn.CrossEntropyLoss()
 
         # Initialize the trainer
-        trainer = MILTrainer(
+        trainer = TileMILTrainer(
             model,
             dataloaders,
             optimizer,
