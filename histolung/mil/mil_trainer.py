@@ -4,6 +4,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from histolung.mil.data_loader import TileDataset, HDF5EmbeddingDataset
 from histolung.models.models import MILModel
@@ -59,9 +60,7 @@ class BaseMILTrainer:
             batch_outputs = []
 
             # Loop over each WSI in the batch
-            for wsi_idx, wsi_id in enumerate(wsi_ids):
-                logging.info(
-                    f"Processing WSI {wsi_idx + 1}/{len(wsi_ids)}: {wsi_id}")
+            for wsi_id in wsi_ids:
 
                 # Create DataLoader for the patches of the current WSI
                 # we call get_augmentations_pipeline once per each WSI
@@ -148,6 +147,26 @@ class BaseMILTrainer:
             f"Validation epoch completed, Average Loss: {epoch_loss:.4f}")
         return epoch_loss, all_preds, all_labels
 
+    # def train(self, num_epochs):
+    #     """
+    #     Trains the MIL model for a specified number of epochs.
+
+    #     Args:
+    #         num_epochs (int): Number of epochs to train the model.
+    #     """
+    #     for epoch in range(num_epochs):
+    #         logging.info(f"Starting epoch {epoch + 1}/{num_epochs}")
+
+    #         # Training phase
+    #         train_loss = self.train_epoch()
+
+    #         # Validation phase
+    #         val_loss, val_preds, val_labels = self.validate_epoch()
+
+    #         logging.info(
+    #             f"Epoch {epoch + 1} completed. Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}"
+    #         )
+
     def train(self, num_epochs):
         """
         Trains the MIL model for a specified number of epochs.
@@ -155,18 +174,30 @@ class BaseMILTrainer:
         Args:
             num_epochs (int): Number of epochs to train the model.
         """
-        for epoch in range(num_epochs):
-            logging.info(f"Starting epoch {epoch + 1}/{num_epochs}")
+        # Lists to track the losses
+        training_losses = []
+        validation_losses = []
 
-            # Training phase
-            train_loss = self.train_epoch()
+        # Create the tqdm progress bar
+        with tqdm(total=num_epochs, desc="Training Progress",
+                  unit="epoch") as pbar:
+            for epoch in range(num_epochs):
+                # Training phase
+                train_loss = self.train_epoch()
+                training_losses.append(train_loss)
 
-            # Validation phase
-            val_loss, val_preds, val_labels = self.validate_epoch()
+                # Validation phase
+                val_loss, val_preds, val_labels = self.validate_epoch()
+                validation_losses.append(val_loss)
 
-            logging.info(
-                f"Epoch {epoch + 1} completed. Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}"
-            )
+                # Update tqdm bar with epoch number, train loss, and val loss
+                pbar.set_postfix({
+                    'Train Loss': f'{train_loss:.4f}',
+                    'Val Loss': f'{val_loss:.4f}'
+                })
+                pbar.update(1)
+
+        return training_losses, validation_losses
 
     def get_embeddings(self, wsi_id):
         """

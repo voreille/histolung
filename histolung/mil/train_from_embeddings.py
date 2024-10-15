@@ -14,14 +14,35 @@ from histolung.mil.utils import (get_wsi_dataloaders, get_loss_function,
                                  get_optimizer)
 from histolung.utils import yaml_load
 
-logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
 # Set project directories and configuration paths
 project_dir = Path(__file__).resolve().parents[2]
 config_path = "/home/valentin/workspaces/histolung/models/MIL/first/config.yaml"
 model_dir = Path("/home/valentin/workspaces/histolung/models/MIL/first/")
+
+
+def set_up_logging(config):
+    """
+    Set up logging to a file based on the model directory. This configures the root logger,
+    so all loggers in the codebase inherit this setup.
+    """
+    exp_name = config["run"]["experiment_name"]
+    log_file = project_dir / f"logs/training/training_from_embedding_{exp_name}.log"
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # Clear existing handlers to avoid duplication
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
+
+    # Configure the root logger
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file),  # Log to a file
+        ])
+
+    # Log the initial setup
+    logging.info(f"Logging set up for experiment: {exp_name}")
 
 
 def load_metadata():
@@ -87,6 +108,7 @@ def main():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     # Configuration
     config = yaml_load(config_path)
+    set_up_logging(config)
     num_epochs = config["training"]["epochs"]
     label_map = config["data"]["label_map"]
     hdf5_path = project_dir / config["data"]["embedding_file"]
@@ -111,8 +133,7 @@ def main():
             wsi_metadata_by_folds,
             fold,
             label_map,
-            batch_size=config["training"]["batch_size"]
-        )
+            batch_size=config["training"]["batch_size"])
 
         optimizer = get_optimizer(
             model,
@@ -135,13 +156,13 @@ def main():
         )
 
         # Train the model
-        logger.info(f"Starting training for fold {fold+1}")
-        trainer.train(num_epochs)
-        logger.info(f"Completed training for fold {fold+1}")
+        logging.info(f"Starting training for fold {fold+1}")
+        training_losses, validation_losses = trainer.train(num_epochs)
+        logging.info(f"Completed training for fold {fold+1}")
         # Save the model
         model_save_path = model_dir / f"weights/mil_model_fold_{fold+1}.pth"
         torch.save(model.state_dict(), model_save_path)
-        logger.info(f"Model for fold {fold+1} saved to {model_save_path}")
+        logging.info(f"Model for fold {fold+1} saved to {model_save_path}")
 
     hdf5_file.close()
 
