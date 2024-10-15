@@ -1,6 +1,7 @@
-from pathlib import Path
 import logging
-import time  # For time measurement
+import time
+import click
+from pathlib import Path
 
 import torch
 from torch.utils.data import DataLoader
@@ -10,22 +11,24 @@ from tqdm import tqdm
 
 from histolung.models.models import MILModel
 from histolung.mil.data_loader import WSIDataset, TileDataset
-from histolung.mil.utils import get_preprocessing
 from histolung.utils import yaml_load
 
 project_dir = Path(__file__).parents[2]
-# Set up logging to a file
-model_path = project_dir / "models/MIL/uni"
-log_file = project_dir / "logs/data/embedding_process_uni.log"
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(log_file),  # Log to a file
-    ])
 
-DEBUG = False  # Set to True to limit processing to 4 WSIs for testing
-MAX_WSI_DEBUG = 4  # Limit for WSIs when debugging
+
+def set_up_logging(config):
+    """
+    Set up logging to a file based on the model directory.
+    """
+    exp_name = config["run"]["experiment_name"]
+    log_file = project_dir / f"logs/data/embedding_process_exp_{exp_name}.log"
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file),  # Log to a file
+        ])
+    logging.info(f"Logging set up for model: {config}")
 
 
 def load_metadata():
@@ -59,36 +62,38 @@ def get_wsi_dataloader(wsi_metadata, label_map, batch_size=1):
 
 
 def store_all_embeddings(
-    model,
-    device='cuda',
+    config,
+    gpu_id,
     num_workers=4,
     tile_batch_size=32,
     wsi_batch_size=1,
+    debug=False,
+    max_wsi_debug=4,
 ):
     """
     Stores embeddings for all WSIs into a single HDF5 file.
 
     Args:
-        model (MILModel): The MIL model used to generate embeddings.
-        device (str): Device to use ('cuda' or 'cpu').
+        model_dir (Path): Path to the model directory.
+        gpu_id (int): GPU ID to use.
         num_workers (int): Number of workers for DataLoader.
         tile_batch_size (int): Batch size for processing tiles.
+        wsi_batch_size (int): Batch size for WSIs.
+        debug (bool): Whether to run in debug mode (limits the number of WSIs).
+        max_wsi_debug (int): Maximum number of WSIs to process in debug mode.
     """
-    config_path = model_path / "config.yaml"
-    output_file = model_path / "embeddings/all_embeddings.h5"
-    output_file.parent.mkdir(exist_ok=True)
-    config = yaml_load(config_path)
+    device = torch.device(
+        f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu")
+    logging.info(f"Using device: {device}")
 
-    logging.info(f"Loaded configuration from {config_path}")
+    output_file = Path(config["data"]["embedding_file"])
+    output_file.parent.mkdir(exist_ok=True)
 
     wsi_metadata = load_metadata()
 
     wsi_dataloader = get_wsi_dataloader(
         wsi_metadata,
-        label_map={
-            "lusc": 0,
-            "luad": 1
-        },
+        label_map=config["data"]["label_map"],
         batch_size=wsi_batch_size,
     )
     tile_paths_by_wsi = {d["wsi_id"]: d["patch_files"] for d in wsi_metadata}
@@ -97,7 +102,7 @@ def store_all_embeddings(
     model.to(device)
     model.eval()  # Set model to evaluation mode
 
-    preprocess = get_preprocessing(config["data"])
+    preprocess = model.get_preprocessing(config["data"])
 
     start_time = time.time()  # Start measuring time
 
@@ -133,14 +138,14 @@ def store_all_embeddings(
                 wsi_count += 1
 
                 # If in debug mode and max WSI limit reached, stop early
-                if DEBUG and wsi_count >= MAX_WSI_DEBUG:
+                if debug and wsi_count >= max_wsi_debug:
                     logging.info(
                         f"DEBUG mode: Stopped after processing {wsi_count} WSIs."
                     )
                     break
 
             # Stop the outer loop if DEBUG mode limit is reached
-            if DEBUG and wsi_count >= MAX_WSI_DEBUG:
+            if debug and wsi_count >= max_wsi_debug:
                 break
 
     total_time = time.time() - start_time  # End of time measurement
@@ -148,10 +153,56 @@ def store_all_embeddings(
     logging.info(f"Total time taken: {total_time:.2f} seconds")
 
 
-if __name__ == "__main__":
-    # Store embeddings for all WSIs
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    print(f"Device used: {device}")
+@click.command()
+@click.option(
+    '--config',
+    type=click.Path(exists=True, dir_okay=False),
+    required=True,
+    help="Path to the model directory.",
+)
+@click.option('--gpu-id', type=int, default=0, help="GPU ID to use.")
+@click.option(
+    '--num-workers',
+    type=int,
+    default=4,
+    help="Number of workers for DataLoader.",
+)
+@click.option(
+    '--tile-batch-size',
+    type=int,
+    default=32,
+    help="Batch size for processing tiles.",
+)
+@click.option(
+    '--wsi-batch-size',
+    type=int,
+    default=1,
+    help="Batch size for WSIs.",
+)
+@click.option(
+    '--debug',
+    is_flag=True,
+    help="Enable debug mode to limit processing to 4 WSIs.",
+)
+def main(config, gpu_id, num_workers, tile_batch_size, wsi_batch_size, debug):
+    """
+    CLI for storing embeddings for all WSIs in a given model directory.
+    """
+    config = yaml_load(config)
+    set_up_logging(config)
+    logging.info("Starting the embedding process...")
 
-    # Start the embedding process and time it
-    store_all_embeddings(model_path, device=device)
+    store_all_embeddings(
+        config,
+        gpu_id=gpu_id,
+        num_workers=num_workers,
+        tile_batch_size=tile_batch_size,
+        wsi_batch_size=wsi_batch_size,
+        debug=debug,
+    )
+
+    logging.info("Embedding process complete.")
+
+
+if __name__ == "__main__":
+    main()

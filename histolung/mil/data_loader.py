@@ -79,7 +79,13 @@ class TileDataset(Dataset):
 
 class HDF5EmbeddingDataset(Dataset):
 
-    def __init__(self, hdf5_path, label_map, wsi_ids):
+    def __init__(
+        self,
+        hdf5_path=None,
+        hdf5_file=None,
+        label_map=None,
+        wsi_ids=None,
+    ):
         """
         Dataset for iterating through embeddings stored in an HDF5 file.
         
@@ -91,7 +97,7 @@ class HDF5EmbeddingDataset(Dataset):
         self.hdf5_path = hdf5_path
         self.label_map = label_map  # Mapping between wsi_id and label
         self.wsi_ids = wsi_ids  # List of WSI IDs
-        self.hdf5_file = None  # Will hold the opened HDF5 file handle
+        self.hdf5_file = hdf5_file  # Will hold the opened HDF5 file handle
 
     def __len__(self):
         """Return the number of WSIs in the dataset."""

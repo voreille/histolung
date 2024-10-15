@@ -176,13 +176,13 @@ class UNIFeatureExtractor(nn.Module):
 
 class ResNetFeatureExtractor(BaseFeatureExtractor):
 
-    def __init__(self,
-                 model_name: str,
-                 freeze_weights=True,
-                 fine_tune_last_n_layers=0):
+    def __init__(
+        self,
+        model_name: str,
+        freeze_weights=True,
+    ):
         super(ResNetFeatureExtractor, self).__init__()
         self.model_name = model_name
-        self.fine_tune_last_n_layers = fine_tune_last_n_layers
         self.model = None
         self.feature_dim = None
         self.load_model()
@@ -211,8 +211,8 @@ class ResNetFeatureExtractor(BaseFeatureExtractor):
         if self.freeze_weights:
             self.freeze_weights()
 
-        if self.fine_tune_last_n_layers > 0:
-            self.unfreeze_last_n_layers(self.fine_tune_last_n_layers)
+        # if self.fine_tune_last_n_layers > 0:
+        #     self.unfreeze_last_n_layers(self.fine_tune_last_n_layers)
 
     def unfreeze_last_n_layers(self, n: int):
         total_layers = list(self.model.parameters())

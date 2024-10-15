@@ -119,13 +119,17 @@ class BaseMILTrainer:
 
                 # Forward pass: embeddings from patches, then predictions
                 batch_outputs = []
-                for wsi_id in enumerate(wsi_ids):
+                for wsi_id in wsi_ids:
                     embeddings = self.get_embeddings(wsi_id)
                     outputs, _ = self.model(embeddings)
                     batch_outputs.append(outputs)
 
+                # Stack the aggregated outputs for the entire batch
+                batch_outputs = torch.stack(batch_outputs)
                 # Compute loss
-                loss = self.loss_fn(batch_outputs, labels)
+                labels_one_hot = F.one_hot(labels,
+                                           num_classes=self.num_classes)
+                loss = self.loss_fn(batch_outputs, labels_one_hot.float())
                 running_loss += loss.item() * batch_outputs.size(0)
 
                 # Collect predictions and labels
@@ -203,7 +207,7 @@ class TileMILTrainer(BaseMILTrainer):
         self.tile_augmentation = tile_augmentation
         if tile_paths_by_wsi is None:
             raise RuntimeError(
-                "You must provide a mapping to the path of the patches"
+                "You must provide a mapping to the path of the patches "
                 "in the tile_paths_by_wsi kwargs")
         else:
             self.tile_paths_by_wsi = tile_paths_by_wsi
@@ -259,7 +263,7 @@ class EmbeddingMILTrainer(BaseMILTrainer):
                  loss_fn,
                  device='cuda',
                  hdf5_file=None):
-        super().__init__(model, optimizer, loss_fn, device)
+        super().__init__(model, dataloaders, optimizer, loss_fn, device)
         self.dataloaders = dataloaders
         self.hdf5_file = hdf5_file
 
@@ -273,5 +277,6 @@ class EmbeddingMILTrainer(BaseMILTrainer):
         Returns:
             tuple: Embeddings for the WSI and its label.
         """
-        embeddings = torch.tensor(self.hdf5_file['embeddings'][wsi_id][:])
+        embeddings = torch.tensor(self.hdf5_file['embeddings'][wsi_id][:]).to(
+            self.device)
         return embeddings

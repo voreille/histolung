@@ -216,6 +216,9 @@ class MILModel(nn.Module):
 
         return model
 
+    def get_preprocessing(self, data_cfg):
+        return self.feature_extractor.get_preprocessing(data_cfg)
+
     def forward(self, x):
         """
         Forward pass for MIL model.
