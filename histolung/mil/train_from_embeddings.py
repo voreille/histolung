@@ -16,8 +16,8 @@ from histolung.utils import yaml_load
 
 # Set project directories and configuration paths
 project_dir = Path(__file__).resolve().parents[2]
-config_path = "/home/valentin/workspaces/histolung/models/MIL/first/config.yaml"
-model_dir = Path("/home/valentin/workspaces/histolung/models/MIL/first/")
+config_path = "/home/valentin/workspaces/histolung/models/MIL/uni/config.yaml"
+model_dir = Path("/home/valentin/workspaces/histolung/models/MIL/uni/")
 
 
 def set_up_logging(config):
@@ -65,43 +65,6 @@ def split_by_fold(wsi_metadata, fold_df):
             output[fold].append(wsi_info)
 
     return output, n_folds
-
-
-def get_dataloaders_from_hdf5(
-    hdf5_file,
-    wsi_metadata_by_folds,
-    fold,
-    label_map,
-    batch_size=2,
-):
-    """
-    Create training and validation DataLoaders based on the current fold.
-    """
-    wsi_meta_train = [
-        wsi for i, wsi_fold in enumerate(wsi_metadata_by_folds) if i != fold
-        for wsi in wsi_fold
-    ]
-    wsi_meta_val = wsi_metadata_by_folds[fold]
-
-    train_dataset = HDF5EmbeddingDataset(
-        hdf5_file=hdf5_file,
-        label_map=label_map,
-        wsi_ids=wsi_meta_train,
-    )
-    val_dataset = HDF5EmbeddingDataset(
-        hdf5_file=hdf5_file,
-        label_map=label_map,
-        wsi_ids=wsi_meta_val,
-    )
-
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-    )
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-
-    return {"train": train_loader, "val": val_loader}
 
 
 def main():
@@ -161,6 +124,7 @@ def main():
         logging.info(f"Completed training for fold {fold+1}")
         # Save the model
         model_save_path = model_dir / f"weights/mil_model_fold_{fold+1}.pth"
+        model_save_path.parent.mkdir(parents=False, exist_ok=True)
         torch.save(model.state_dict(), model_save_path)
         logging.info(f"Model for fold {fold+1} saved to {model_save_path}")
 

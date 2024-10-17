@@ -14,10 +14,10 @@ A short description of the project.
 - [ ] Add attention channel for multilabel output?
 - [ ] Implement multi-gpu support with torch.nn.DistributedDataParallel
 - [ ] make usage of the word tile or patch consistent
-- [ ] check the weight for BCEWithLogitsLoss
 - [ ] set the seeds!
 - [ ] organize better the paths for multiple models and datasets
 - [ ] Include MLFlow
+- [ ] Implement a system to map embeddings with a set of parameters
 
 
 ## Project Organization
