@@ -17,6 +17,7 @@ class BaseFeatureExtractor(ABC, nn.Module):
         super(BaseFeatureExtractor, self).__init__()
         self.model = None
         self._frozen = False
+        self.feature_dim = None
 
     def forward(self, x):
         return self.model(x)

@@ -26,11 +26,9 @@ def prepare_kfold_tcga_data(root_dir, label_map, k=5):
             if wsi_id_dir.is_dir():
                 wsi_tiles_dir = wsi_id_dir / f'{wsi_id_dir.name}_tiles'
                 if wsi_tiles_dir.exists():
-                    tile_paths = list(wsi_tiles_dir.glob(
-                        '*.png'))  # Get all tiles for the WSI
-                    label = label_map[class_name]  # WSI-level label
-                    wsi_list.append((wsi_id_dir.name, tile_paths,
-                                     label))  # Append (wsi_id, tiles, label)
+                    tile_paths = list(wsi_tiles_dir.glob('*.png'))
+                    label = label_map[class_name]
+                    wsi_list.append((wsi_id_dir.name, tile_paths, label))
 
     # Step 2: Perform KFold splitting at the WSI level
     kf = KFold(n_splits=k, shuffle=True, random_state=42)

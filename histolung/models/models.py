@@ -43,55 +43,6 @@ def load_pretrained_model(model_name: str, keep_last_layer=False):
     return model, feature_dim, image_size
 
 
-# class FeatureExtractor(nn.Module):
-
-#     def __init__(self,
-#                  model_name: str,
-#                  keep_last_layer=False,
-#                  freeze_weights=True,
-#                  fine_tune_last_n_layers=0):
-#         super(FeatureExtractor, self).__init__()
-#         self.model, self.feature_dim, self.image_size = load_pretrained_model(
-#             model_name=model_name, keep_last_layer=keep_last_layer)
-
-#         # Freeze all layers by default if freeze_weights is set to True
-#         if freeze_weights:
-#             self.freeze_all_layers()
-
-#         # Fine-tune the last `n` layers if specified
-#         if fine_tune_last_n_layers > 0:
-#             self.unfreeze_last_n_layers(fine_tune_last_n_layers)
-
-#     def freeze_all_layers(self):
-#         """
-#         Freezes all layers in the feature extractor by setting requires_grad to False.
-#         """
-#         for param in self.model.parameters():
-#             param.requires_grad = False
-
-#     def unfreeze_last_n_layers(self, n: int):
-#         """
-#         Unfreezes the last `n` layers of the feature extractor, based on its architecture.
-
-#         Args:
-#             n (int): Number of layers from the end to unfreeze.
-#         """
-#         # This is an architecture-specific fine-tuning method.
-#         # Unfreeze the last `n` layers based on the architecture.
-#         total_layers = list(self.model.parameters())
-#         for param in total_layers[-n:]:
-#             param.requires_grad = True
-
-#         # Additionally, handle specific types of layers like BatchNorm
-#         for layer in self.model.modules():
-#             if isinstance(layer, nn.BatchNorm2d) and not any(
-#                     p.requires_grad for p in layer.parameters()):
-#                 layer.eval()  # Keep BatchNorm in eval mode for frozen layers
-
-#     def forward(self, x):
-#         return self.model(x)
-
-
 # Example of attention-based aggregator
 class BaseAggregator(nn.Module):
 
@@ -196,6 +147,7 @@ class MILModel(nn.Module):
         aggregator_type = model_cfg['aggregator']
         projection_dim = model_cfg['projection_dim']
         num_classes = model_cfg['num_classes']
+        dropout = model_cfg['dropout']
 
         # Instantiate the feature extractor
         feature_extractor = BaseFeatureExtractor.get_feature_extractor(
@@ -206,7 +158,9 @@ class MILModel(nn.Module):
             aggregator = AttentionAggregator(
                 input_dim=feature_extractor.feature_dim,
                 hidden_dim=projection_dim,
-                num_classes=num_classes)
+                num_classes=num_classes,
+                dropout=dropout,
+            )
         else:
             aggregator = MeanPoolingAggregator()
 

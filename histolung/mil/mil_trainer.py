@@ -2,6 +2,7 @@ import logging
 
 import torch
 import torch.nn.functional as F
+import torch.optim.lr_scheduler as lr_scheduler
 import numpy as np
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -32,6 +33,7 @@ class BaseMILTrainer:
                  dataloaders: dict[str, DataLoader],
                  optimizer,
                  loss_fn,
+                 training_cfg: dict = None,
                  device='cuda'):
         self.model = model.to(device)
         self.optimizer = optimizer
@@ -39,6 +41,29 @@ class BaseMILTrainer:
         self.device = device
         self.dataloaders = dataloaders
         self.num_classes = model.num_classes
+        self.set_scheduler(training_cfg)
+
+    def set_scheduler(self, training_cfg):
+        if not training_cfg or "scheduler" not in training_cfg:
+            self.scheduler = None
+            return
+
+        if training_cfg["scheduler"]:
+            scheduler_name = training_cfg["lr_scheduler"]
+            scheduler_args = training_cfg["lr_scheduler_args"]
+
+            # Dynamically get the scheduler class
+            try:
+                scheduler_class = getattr(lr_scheduler, scheduler_name)
+            except AttributeError:
+                raise ValueError(
+                    f"Invalid scheduler name: {scheduler_name}. Please check the available schedulers in PyTorch."
+                )
+
+            # Instantiate the scheduler with the given arguments
+            self.scheduler = scheduler_class(self.optimizer, **scheduler_args)
+        else:
+            self.scheduler = None
 
     def train_epoch(self):
         """
@@ -147,26 +172,6 @@ class BaseMILTrainer:
             f"Validation epoch completed, Average Loss: {epoch_loss:.4f}")
         return epoch_loss, all_preds, all_labels
 
-    # def train(self, num_epochs):
-    #     """
-    #     Trains the MIL model for a specified number of epochs.
-
-    #     Args:
-    #         num_epochs (int): Number of epochs to train the model.
-    #     """
-    #     for epoch in range(num_epochs):
-    #         logging.info(f"Starting epoch {epoch + 1}/{num_epochs}")
-
-    #         # Training phase
-    #         train_loss = self.train_epoch()
-
-    #         # Validation phase
-    #         val_loss, val_preds, val_labels = self.validate_epoch()
-
-    #         logging.info(
-    #             f"Epoch {epoch + 1} completed. Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}"
-    #         )
-
     def train(self, num_epochs):
         """
         Trains the MIL model for a specified number of epochs.
@@ -177,6 +182,7 @@ class BaseMILTrainer:
         # Lists to track the losses
         training_losses = []
         validation_losses = []
+        epochs_without_improvement = 0
 
         # Create the tqdm progress bar
         with tqdm(total=num_epochs, desc="Training Progress",
@@ -191,6 +197,30 @@ class BaseMILTrainer:
                 validation_losses.append(val_loss)
 
                 # Update tqdm bar with epoch number, train loss, and val loss
+                pbar.set_postfix({
+                    'Train Loss': f'{train_loss:.4f}',
+                    'Val Loss': f'{val_loss:.4f}'
+                })
+                pbar.update(1)
+
+                # Early stopping logic
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    epochs_without_improvement = 0
+                else:
+                    epochs_without_improvement += 1
+                    if (self.early_stop_patience and epochs_without_improvement
+                            >= self.early_stop_patience):
+                        print(
+                            f"Stopping early after {epoch + 1} epochs without improvement."
+                        )
+                        break
+
+                # Scheduler step (after epoch)
+                if self.scheduler:
+                    self.scheduler.step(val_loss)
+
+                # Update tqdm progress bar
                 pbar.set_postfix({
                     'Train Loss': f'{train_loss:.4f}',
                     'Val Loss': f'{val_loss:.4f}'
@@ -293,8 +323,16 @@ class EmbeddingMILTrainer(BaseMILTrainer):
                  optimizer,
                  loss_fn,
                  device='cuda',
+                 training_cfg: dict = None,
                  hdf5_file=None):
-        super().__init__(model, dataloaders, optimizer, loss_fn, device)
+        super().__init__(
+            model,
+            dataloaders,
+            optimizer,
+            loss_fn,
+            device,
+            training_cfg=training_cfg,
+        )
         self.dataloaders = dataloaders
         self.hdf5_file = hdf5_file
 

@@ -5,9 +5,14 @@ import logging
 import torch
 import h5py
 import pandas as pd
+import pytorch_lightning as pl
+from lightning.pytorch import Trainer, seed_everything
+from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
+from pytorch_lightning.strategies import DDPStrategy
+# import mlflow
 
 from histolung.models.models import MILModel
-from histolung.mil.mil_trainer import EmbeddingMILTrainer
+from histolung.mil.lightning_module import MILLightningModule
 from histolung.mil.utils import (get_wsi_dataloaders, get_loss_function,
                                  get_optimizer)
 from histolung.utils import yaml_load
@@ -67,6 +72,9 @@ def split_by_fold(wsi_metadata, fold_df):
 
 def main():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    # sets seeds for numpy, torch and python.random.
+    seed_everything(42, workers=True)
+
     # Configuration
     config = yaml_load(config_path)
     set_up_logging(config)
@@ -106,26 +114,42 @@ def main():
             device=device,
             **config["training"]["loss_kwargs"],
         )
-        # Initialize the trainer
-        trainer = EmbeddingMILTrainer(
-            model,
-            wsi_dataloaders,
-            optimizer,
-            loss_fn,
-            device=device,
+
+        mil_module = MILLightningModule(
+            model=model,
+            loss_fn=loss_fn,
+            optimizer_config=config["training"]["optimizer_kwargs"],
+            num_classes=config["model"]["num_classes"],
             hdf5_file=hdf5_file,
-            training_cfg=config["training"],
+        )
+        # Define Callbacks
+        checkpoint_callback = ModelCheckpoint(dirpath=project_dir / "models/MIL/first/weights",
+                                              monitor="val_loss",
+                                              save_top_k=1,
+                                              mode="min",)
+        early_stopping_callback = EarlyStopping(monitor="val_loss",
+                                                patience=5,
+                                                mode="min",)
+
+        # mlflow.set_experiment(config["run"]["experiment_name"])
+        # with mlflow.start_run():
+        # mlflow.log_params(config)
+
+        # Initialize PyTorch Lightning Trainer
+        trainer = Trainer(
+            strategy=DDPStrategy(find_unused_parameters=True),
+            max_epochs=num_epochs,
+            devices=[0],
+            callbacks=[checkpoint_callback, early_stopping_callback],
+            logger=False  # No built-in logger, use MLflow
         )
 
         # Train the model
-        logging.info(f"Starting training for fold {fold+1}")
-        training_losses, validation_losses = trainer.train(num_epochs)
-        logging.info(f"Completed training for fold {fold+1}")
-        # Save the model
-        model_save_path = model_dir / f"weights/mil_model_fold_{fold+1}.pth"
-        model_save_path.parent.mkdir(parents=False, exist_ok=True)
-        torch.save(model.state_dict(), model_save_path)
-        logging.info(f"Model for fold {fold+1} saved to {model_save_path}")
+        trainer.fit(mil_module, wsi_dataloaders["train"],
+                    wsi_dataloaders["val"])
+
+        # Log the best model to MLflow
+        # mlflow.pytorch.log_model(model, "model")
 
     hdf5_file.close()
 
