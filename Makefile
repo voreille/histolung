@@ -58,7 +58,7 @@ create_environment:
 ## Make Dataset
 .PHONY: data
 data: requirements
-	$(PYTHON_INTERPRETER) histolung/dataset.py
+	$(PYTHON_INTERPRETER) histolung/automate_tiling.py
 
 
 #################################################################################
