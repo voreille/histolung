@@ -1,0 +1,73 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+
+        {
+            "name": "Debug run_histoqc_task",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/histolung/data/preprocess.py",
+            "args": [
+                "run-histoqc-task",
+                "--dataset",
+                "tcga_luad",
+                "--num_workers",
+                "12",
+            ],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Debug rename_masks_task",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/histolung/data/preprocess.py",
+            "args": [
+                "rename-masks-task",
+                "--dataset",
+                "tcga_luad"
+            ],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Debug tile_wsi_task",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/histolung/data/preprocess.py",
+            "args": [
+                "tile-wsi-task",
+                "--dataset",
+                "tcga_luad",
+                "--tile_size",
+                "224",
+                "--threshold",
+                "0.8",
+                "--num_workers",
+                "1",
+                "--save_tile_overlay",
+                "--debug_id",
+                "TCGA-55-7910-01Z-00-DX1",
+            ],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Debug process_dataset",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/histolung/data/preprocess.py",
+            "args": [
+                "process-dataset",
+                "--dataset",
+                "tcga_luad"
+            ],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Debug current file",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": []
+        }
+    ]
+}

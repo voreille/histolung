@@ -4,6 +4,8 @@ import subprocess
 from pathlib import Path
 import logging
 
+from histolung.utils.yaml import load_yaml_with_env
+
 logger = logging.getLogger(__name__)
 
 # A flag to keep track if the Docker image has been checked
@@ -75,7 +77,7 @@ def parse_and_log_output(output: str, logger: logging.Logger, context: str):
                 logger.info(f"{context}: {line}")
 
 
-def compute_usable_mask(
+def compute_usable_mask_old(
     input_image,
     output_dir,
     docker_image='histotools/histoqc:master',
@@ -132,14 +134,14 @@ def compute_usable_mask(
         raise
 
 
-def compute_usable_mask_refactor(
-    input_dir,
-    output_dir,
-    input_pattern="*.svs",
-    docker_image='histotools/histoqc:master',
-    user=None,
-    config_path=None,
-):
+def run_histoqc(input_dir,
+                output_dir,
+                input_pattern="*.svs",
+                docker_image='histotools/histoqc:master',
+                user=None,
+                config_path=None,
+                force=False,
+                num_workers=None):
     """
     Tile a single image using HistoQC Docker, capturing and logging Docker stdout and stderr.
     """
@@ -161,13 +163,80 @@ def compute_usable_mask_refactor(
     else:
         raise ValueError("Config path must be provided for HistoQC.")
 
+    histoqc_command = f"histoqc_pipeline /data_ro/{input_pattern} -o /data/output -c {config_path}"
+    if force:
+        histoqc_command += " --force"
+
+    if num_workers:
+        histoqc_command += f" --n {num_workers}"
+
     command = [
         "docker", "run", "--rm", "-v", f"{input_dir}:/data_ro:ro", "-v",
         f"{output_dir}:/data", "-v",
         f"{config_path.parent}:{config_path.parent}", "--name",
         f"histoqc_{input_dir.name}", "-u", user, docker_image, "/bin/bash",
-        "-c",
-        f"histoqc_pipeline /data_ro/{input_pattern} -o /data/output -c {config_path}"
+        "-c", histoqc_command
+    ]
+
+    try:
+        # Capture stdout and stderr from the Docker process
+        result = subprocess.run(command, check=True)
+
+        # Log the Docker stdout and stderr
+        context = f"HistoQC output for '{input_dir.name}'"
+        parse_and_log_output(result.stdout, logger, context)
+        parse_and_log_output(result.stderr, logger, context)
+
+        logger.info(f"Tiling completed for image {input_dir.name}.")
+
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Error during tiling for {input_dir.name}: {e}")
+        raise
+
+
+def run_histoqc_raw_path_mounted(input_dir,
+                                 output_dir,
+                                 input_pattern="*.svs",
+                                 docker_image='histotools/histoqc:master',
+                                 user=None,
+                                 config_path=None,
+                                 force=False,
+                                 num_workers=None):
+    """
+    Tile a single image using HistoQC Docker, capturing and logging Docker stdout and stderr.
+    With the raw data mounted to ensure consistency in the raw paths for the results.tsv
+    """
+    # Ensure Docker image is present (check only once)
+    check_and_pull_docker_image(docker_image)
+
+    # Default user if not specified
+    user = user or f'{os.getuid()}:{os.getgid()}'
+
+    # Ensure output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+
+    input_dir = Path(input_dir).resolve()
+    output_dir = Path(output_dir).resolve()
+
+    # Ensure the config path is provided
+    if config_path is not None:
+        config_path = Path(config_path)
+    else:
+        raise ValueError("Config path must be provided for HistoQC.")
+
+    histoqc_command = f"histoqc_pipeline {input_dir}/{input_pattern} -o /data/output -c {config_path}"
+    if force:
+        histoqc_command += " --force"
+
+    if num_workers:
+        histoqc_command += f" --n {num_workers}"
+
+    command = [
+        "docker", "run", "--rm", "-v", f"{input_dir}:{input_dir}:ro", "-v",
+        f"{output_dir}:/data", "-v",
+        f"{config_path.parent}:{config_path.parent}", "--name",
+        f"histoqc_{input_dir.name}", "-u", user, docker_image, "/bin/bash",
+        "-c", histoqc_command
     ]
 
     try:

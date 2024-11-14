@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from histolung.data.binarize_with_histoqc import compute_usable_mask
+from histolung.data.histoqc import compute_usable_mask
 
 
 def main():

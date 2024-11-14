@@ -1,0 +1,16 @@
+datasets:
+  tcga_luad:
+    data_dir: "${TCGA_DATA_RAW_PATH}/LUAD"
+    input_pattern: "*/*DX*.svs"
+    histoqc_config_path: "histolung/config/HistoQC/config.ini"
+  tcga_lusc:
+    data_dir: "${TCGA_DATA_RAW_PATH}/LUSC"
+    input_pattern: "*/*DX*.svs"
+    histoqc_config_path: "histolung/config/HistoQC/config.ini"
+  cptac_lscc:
+    data_dir: "${CPTAC_DATA_RAW_PATH}/CPTAC-LSCC_v10/LSCC"
+    input_pattern: "*.svs"
+    histoqc_config_path: "histolung/config/HistoQC/config.ini"
+
+histoqc_masks_basedir: "data/interim/masks"
+tiles_basedir: "data/interim/tiles"

@@ -19,6 +19,19 @@ A short description of the project.
 - [ ] Include MLFlow
 - [ ] Implement a system to map embeddings with a set of parameters
 
+Task: output csv file with tiles location
+Goal: during tiling output a csv with the position of the tiles in the original WSI
+Current Progress: 
+- None
+
+Task: fix the following error message
+message: "WARNING:histolung.data.tiling:Processing failed for WSI TCGA-78-8648-01Z-00-DX1.D3EAEF8E-E739-490F-BF48-A4796B0C0E7A.svs
+ERROR:histolung.data.tiling:Error processing WSI TCGA-55-7910-01Z-00-DX1.041e15d5-4852-49f6-85d9-74b510497651.svs: operands could not be broadcast together with shapes (2146,3147,3) (2146,3148,3)"
+HINT: Line 75 of wsi_tiler.py fucking get_thumbnail of openslide...
+I gess I will just resize the thumbnail to match the mask
+
+Task: Change histoqc parmater to make better masks
+Cases: TCGA-86-8279-01Z-00-DX1, ...
 
 ## Project Organization
 

@@ -259,10 +259,16 @@ class TileMILTrainer(BaseMILTrainer):
                  optimizer,
                  loss_fn,
                  device='cuda',
+                 training_cfg=None,
                  tile_preprocess=None,
                  tile_paths_by_wsi=None,
                  tile_augmentation=None):
-        super().__init__(model, dataloaders, optimizer, loss_fn, device)
+        super().__init__(model,
+                         dataloaders,
+                         optimizer,
+                         loss_fn,
+                         device=device,
+                         training_cfg=training_cfg)
         self.dataloaders = dataloaders
         self.tile_preprocess = tile_preprocess
         self.tile_augmentation = tile_augmentation

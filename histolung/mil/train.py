@@ -72,6 +72,7 @@ def main(model_dir=None):
             optimizer,
             loss_fn,
             device=device,
+            training_cfg=config["training"],
             tile_paths_by_wsi=tile_paths_by_wsi,
             tile_preprocess=preprocess,
         )
