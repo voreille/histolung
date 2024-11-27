@@ -187,10 +187,10 @@ def run_histoqc(input_dir,
         parse_and_log_output(result.stdout, logger, context)
         parse_and_log_output(result.stderr, logger, context)
 
-        logger.info(f"Tiling completed for image {input_dir.name}.")
+        logger.info(f"Mask computed for image {input_dir.name}.")
 
     except subprocess.CalledProcessError as e:
-        logger.error(f"Error during tiling for {input_dir.name}: {e}")
+        logger.error(f"Error during mask computing for {input_dir.name}: {e}")
         raise
 
 

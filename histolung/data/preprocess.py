@@ -117,7 +117,12 @@ def tile_wsi_task(
 
     data_dir = Path(dataset_config["data_dir"])
     masks_dir = masks_basedir / dataset
-    tiles_dir = tiles_basedir / dataset
+    if debug_id:
+        _tiles_basedir = tiles_basedir.parent / f"debug_{tiles_basedir.name}"
+    else:
+        _tiles_basedir = tiles_basedir
+
+    tiles_dir = _tiles_basedir / dataset
     tiles_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info(f"Tiling WSIs for dataset: {dataset}")

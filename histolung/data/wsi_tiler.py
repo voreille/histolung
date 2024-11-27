@@ -71,20 +71,22 @@ class WSITilerWithMask:
             self.wsi_thumbnail = self.wsi.get_thumbnail(
                 (mask_width, mask_height)).convert("RGB")
 
-            # Resize mask to match thumbnail size and create an RGB mask
-            mask_resized = Image.fromarray(
-                (self.mask_array * 255).astype(np.uint8)).resize(
-                    (mask_width, mask_height), Image.NEAREST)
+            # mask_width, mask_height = self.wsi_thumbnail.size
 
-            # Convert mask to binary (0 or 1) for multiplication
-            mask_binary = np.array(mask_resized) / 255
-            mask_rgb = np.stack([mask_binary] * 3, axis=-1)
+            # # Resize mask to match thumbnail size and create an RGB mask
+            # mask_resized = Image.fromarray(
+            #     (self.mask_array * 255).astype(np.uint8)).resize(
+            #         (mask_width, mask_height), Image.NEAREST)
 
-            # Apply the mask by multiplying with the thumbnail
+            # # Convert mask to binary (0 or 1) for multiplication
+            # mask_binary = np.array(mask_resized) / 255
+            # mask_rgb = np.stack([mask_binary] * 3, axis=-1)
 
-            thumbnail_array = np.array(self.wsi_thumbnail)
-            masked_thumbnail = (thumbnail_array * mask_rgb).astype(np.uint8)
-            self.wsi_thumbnail = Image.fromarray(masked_thumbnail)
+            # # Apply the mask by multiplying with the thumbnail
+
+            # thumbnail_array = np.array(self.wsi_thumbnail)
+            # masked_thumbnail = (thumbnail_array * mask_rgb).astype(np.uint8)
+            # self.wsi_thumbnail = Image.fromarray(masked_thumbnail)
 
     def _get_mask_scale_factor(self):
         # Calculate separate scale factors for width and height
@@ -247,14 +249,16 @@ class WSITilerWithMask:
 
     def save_overlay(self):
         if self.save_tile_overlay:
-            overlay_path = self.output_dir / "tile_overlay.png"
+            overlay_path = self.output_dir / f"{self.wsi_id}__tile_overlay.png"
             self.wsi_thumbnail.save(overlay_path)
 
-    def save_metadata(self, path):
+    def save_metadata(self, path=None):
         """
         Save metadata to a CSV file using pandas.
         """
         # Convert the metadata list to a pandas DataFrame
+        if path is None:
+            path = self.output_dir / f"{self.wsi_id}__tiling_results.csv"
         metadata_df = pd.DataFrame(self.metadata)
 
         # Save the DataFrame to a CSV file

@@ -36,6 +36,7 @@ def process_wsi(
     save_mask=False,
     save_tile_overlay=False,
     num_workers=24,
+    save_metadata=True,
 ):
     try:
         tile_processor = WSITilerWithMask(
@@ -77,6 +78,9 @@ def process_wsi(
 
     if save_tile_overlay:
         tile_processor.save_overlay()
+
+    if save_metadata:
+        tile_processor.save_metadata()
 
     return True  # Return True to indicate success
 

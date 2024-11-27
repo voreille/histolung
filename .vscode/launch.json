@@ -42,7 +42,7 @@
                 "--threshold",
                 "0.8",
                 "--num_workers",
-                "1",
+                "12",
                 "--save_tile_overlay",
                 "--debug_id",
                 "TCGA-55-7910-01Z-00-DX1",
