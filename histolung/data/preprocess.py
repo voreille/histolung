@@ -131,9 +131,11 @@ def tile_wsi_task(
         tiles_dir,
         tile_size=tile_size,
         threshold=threshold,
-        num_workers=num_workers,
+        num_workers_tiles=4,
+        num_workers_wsi=num_workers,
         save_tile_overlay=save_tile_overlay,
         debug_id=debug_id,
+        magnification=dataset_config["magnification"],
     )
     logger.info("WSI tiling completed.")
 
