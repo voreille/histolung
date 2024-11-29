@@ -20,13 +20,23 @@ A short description of the project.
 - [ ] Implement a system to map embeddings with a set of parameters
 
 Task: output csv file with tiles location
-Goal: during tiling output a csv with the position of the tiles in the original WSI
+Goal: during tiling output a csv with the position of the tiles in the original WSI, put rows and columns 
+at the level of extraction, and a keep column.
 Current Progress: 
-- None
+- almost done
 
 Task: check tissue folding tcga_lusc ID:TCGA-21-1080-01Z-00-DX1
 
-Task: change histoqc config to make it work for ID (no mask): TCGA-44-7661-01Z-00-DX1
+Task: put a check to see if there are no tiles and warn and log?
+
+Task: change histoqc config to make it work for ID (no mask):
+no mask: TCGA-44-7661-01Z-00-DX1, TCGA-55-8204-01Z-00-DX1, TCGA-55-8204-01Z-00-DX1
+not enough mask: TCGA-05-4249-01Z-00-DX1, TCGA-44-6777-01Z-00-DX1, TCGA-55-1595-01Z-00-DX1, TCGA-55-7284-01Z-00-DX1, TCGA-55-8092-01Z-00-DX1, 
+folding: TCGA-44-6774-01Z-00-DX1, TCGA-44-6775-01Z-00-DX1, TCGA-49-AAR3-01Z-00-DX1, TCGA-55-5899-01Z-00-DX1(a lot!!!), TCGA-NJ-A7XG-01Z-00-DX1 (weird)
+weird bubble: TCGA-49-6743-01Z-00-DX3, TCGA-49-6745-01Z-00-DX5
+weird pen marking: TCGA-50-5044-01Z-00-DX1
+blue pen marking taken: TCGA-50-6593-01Z-00-DX1, TCGA-50-6597-01Z-00-DX1
+mess pen: TCGA-86-6851-01Z-00-DX1, TCGA-86-7701-01Z-00-DX1, 
 
 ## Project Organization
 

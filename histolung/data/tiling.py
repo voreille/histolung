@@ -61,7 +61,7 @@ def process_wsi(
                         total=len(coordinates),
                         desc="Processing tiles"))
         else:
-            for coor in coordinates:
+            for coor in tqdm(coordinates):
                 tile_processor(coor)
             
 
@@ -93,6 +93,7 @@ def tile_dataset(
     num_workers=1,
     save_tile_overlay=False,
     debug_id=None,
+    magnification=10,
 ):
     mask_files = [f for f in masks_dir.rglob("*mask_use.png")]
     df = pd.read_csv(Path(masks_dir) / "raw_wsi_path.csv")
@@ -109,7 +110,7 @@ def tile_dataset(
             wsi_path,
             mask_path,
             output_dir=output_dir,
-            magnification=10,
+            magnification=magnification,
             tile_size=tile_size,
             threshold=threshold,
             num_workers=num_workers,
@@ -124,7 +125,7 @@ def tile_dataset(
             wsi_path,
             mask_path,
             output_dir=output_dir,
-            magnification=10,
+            magnification=magnification,
             tile_size=tile_size,
             threshold=threshold,
             num_workers=num_workers,

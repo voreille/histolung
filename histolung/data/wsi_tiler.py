@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 from itertools import product
 from multiprocessing.pool import ThreadPool
+import json
 
 import numpy as np
 import pandas as pd
@@ -38,7 +39,7 @@ class WSITilerWithMask:
         self.save_mask = save_mask
         self.save_tile_overlay = save_tile_overlay
         self.raise_error_mag = raise_error_mag
-        self.metadata = []
+        self.patch_metadata = []
         self.x_px_size_level0 = float(
             self.wsi.properties.get("openslide.mpp-x", "nan"))
         self.y_px_size_level0 = float(
@@ -179,6 +180,7 @@ class WSITilerWithMask:
     def __call__(self, coords):
         y, x = coords  # Coordinates for the tile
 
+        tile_id = f'{self.wsi_id}__x{x}_y{y}'
         # Calculate the corresponding region in the mask
         mask_x = int(x // self.mask_scale_factor)
         mask_y = int(y // self.mask_scale_factor)
@@ -189,7 +191,10 @@ class WSITilerWithMask:
         coverage = np.mean(mask_patch > 0)
 
         # If coverage meets the threshold, save the WSI tile
+        keep = 0
         if coverage >= self.threshold:
+
+            keep = 1
             tile = self.wsi.read_region(
                 (x, y),
                 self.level,
@@ -201,35 +206,9 @@ class WSITilerWithMask:
             tile = tile.convert('RGB')  # Convert to RGB if necessary
 
             # Save the tile as a PNG
-            tile_filename = f'{self.wsi_id}__x{x}_y{y}.png'
-            tile_path = self.tiles_output_dir / tile_filename
+            tile_path = self.tiles_output_dir / f"{tile_id}.png"
             tile.save(tile_path)
 
-            # Save metadata
-            self.metadata.append({
-                "patch_id":
-                tile_filename,
-                "x_level0":
-                x,
-                "y_level0":
-                y,
-                "x_current_level":
-                x // self.downsample_factor,
-                "y_current_level":
-                y // self.downsample_factor,
-                "tile_magnification":
-                self.magnification,
-                "base_magnification":
-                self.base_magnification,
-                "x_px_size_tile":
-                self.x_px_size_level0 * self.downsample_factor,
-                "y_px_size_tile":
-                self.y_px_size_level0 * self.downsample_factor,
-                "x_px_size_base":
-                self.x_px_size_level0,
-                "y_px_size_base":
-                self.y_px_size_level0,
-            })
             # Outline the selected tiles on the thumbnail overlay
             if self.save_tile_overlay:
                 outline = Image.new("RGBA",
@@ -247,23 +226,46 @@ class WSITilerWithMask:
                 mask_tile_path = self.output_dir_mask / mask_tile_filename
                 mask_patch_image.save(mask_tile_path)
 
+        # Save metadata
+        self.patch_metadata.append({
+            "tile_id": tile_id,
+            "x_level0": x,
+            "y_level0": y,
+            "x_current_level": x // self.downsample_factor,
+            "y_current_level": y // self.downsample_factor,
+            "keep": keep,
+        })
+
     def save_overlay(self):
         if self.save_tile_overlay:
             overlay_path = self.output_dir / f"{self.wsi_id}__tile_overlay.png"
             self.wsi_thumbnail.save(overlay_path)
 
-    def save_metadata(self, path=None):
+    def save_metadata(self):
         """
         Save metadata to a CSV file using pandas.
         """
         # Convert the metadata list to a pandas DataFrame
-        if path is None:
-            path = self.output_dir / f"{self.wsi_id}__tiling_results.csv"
-        metadata_df = pd.DataFrame(self.metadata)
+        patch_metadata_df = pd.DataFrame(self.patch_metadata)
 
         # Save the DataFrame to a CSV file
-        metadata_df.to_csv(path, index=False)
-        logging.info(f"Metadata saved to {path}")
+        patch_metadata_df.to_csv(
+            self.output_dir / f"{self.wsi_id}__tiling_results.csv",
+            index=False,
+        )
+
+        metadata = {
+            "tile_magnification": self.magnification,
+            "base_magnification": self.base_magnification,
+            "x_px_size_tile": self.x_px_size_level0 * self.downsample_factor,
+            "y_px_size_tile": self.y_px_size_level0 * self.downsample_factor,
+            "x_px_size_base": self.x_px_size_level0,
+            "y_px_size_base": self.y_px_size_level0,
+        }
+        with open(self.output_dir / f"{self.wsi_id}__metadata.json", "w") as f:
+            json.dump(metadata, f, indent=4)
+
+        logging.info(f"Metadata saved to {self.output_dir}")
 
 
 def main(
