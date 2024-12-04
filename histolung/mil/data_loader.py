@@ -2,6 +2,7 @@ import torch
 from torch.utils.data import Dataset
 import pyspng
 import h5py
+import numpy as np
 
 
 class WSIDataset(Dataset):
@@ -39,7 +40,7 @@ class WSIDataset(Dataset):
         """
         wsi_info = self.wsi_metadata[idx]
         wsi_id = wsi_info['wsi_id']
-        label = self.label_map[wsi_info['label']]
+        label = self.label_map[wsi_info['label'].lower()]
 
         # Return WSI ID, list of patch paths, and label
         return wsi_id, label

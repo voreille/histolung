@@ -1,7 +1,9 @@
 import os
+from typing import Union
 from pathlib import Path
 from abc import ABC, abstractmethod
 
+import yaml
 import torch.nn as nn
 import torch
 import torchvision.transforms as T
@@ -31,6 +33,7 @@ class BaseFeatureExtractor(ABC, nn.Module):
         mean = data_cfg["mean"]
         std = data_cfg["std"]
         return T.Compose([
+            T.ToPILImage(),
             T.Resize((image_size, image_size)),
             T.ToTensor(),
             T.Normalize(mean=mean, std=std),
@@ -78,6 +81,27 @@ class BaseFeatureExtractor(ABC, nn.Module):
 
         return extractor_classes[model_name](model_name, **kwargs)
 
+    @staticmethod
+    def from_config(cfg: Union[dict, Path, str]):
+        """
+        Builds a MILModel instance from a configuration dictionary or YAML file.
+        
+        Args:
+            cfg (Union[dict, Path, str]): Configuration dictionary or path to a YAML file.
+        
+        Returns:
+            BaseFeatureExtractor: Configured BaseFeatureExtractor instance.
+        """
+        if isinstance(cfg, Path) or isinstance(cfg, str):
+            with open(cfg, 'r') as file:
+                cfg = yaml.safe_load(file)
+
+        # Load parameters from config
+        model_cfg = cfg["feature_extractor"]
+        name = model_cfg["name"]
+        kwargs = model_cfg["kwargs"]
+        return BaseFeatureExtractor.get_feature_extractor(name, **kwargs)
+
     @property
     def frozen(self):
         print("getter method called")
@@ -111,7 +135,7 @@ class BaseFeatureExtractor(ABC, nn.Module):
         self._frozen = False  # Update state
 
 
-class UNIFeatureExtractor(nn.Module):
+class UNIFeatureExtractor(BaseFeatureExtractor):
 
     def __init__(self,
                  model_name: str,

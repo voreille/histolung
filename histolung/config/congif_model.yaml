@@ -1,8 +1,0 @@
-model:
-  type: "resnet"
-  params:
-    pretrained: True
-
-aggregation:
-  input_dim: 2048
-  output_dim: 1
