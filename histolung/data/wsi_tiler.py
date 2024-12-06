@@ -228,12 +228,24 @@ class WSITilerWithMask:
 
         # Save metadata
         self.patch_metadata.append({
-            "tile_id": tile_id,
-            "x_level0": x,
-            "y_level0": y,
-            "x_current_level": x // self.downsample_factor,
-            "y_current_level": y // self.downsample_factor,
-            "keep": keep,
+            "tile_id":
+            tile_id,
+            "x_level0":
+            x,
+            "y_level0":
+            y,
+            "x_current_level":
+            int(x // self.downsample_factor),
+            "y_current_level":
+            int(y // self.downsample_factor),
+            "row":
+            int(y // self.level0_tile_size),
+            "column":
+            int(x // self.level0_tile_size),
+            "keep":
+            keep,
+            "mask_coverage_ratio":
+            coverage,
         })
 
     def save_overlay(self):
@@ -246,7 +258,8 @@ class WSITilerWithMask:
         Save metadata to a CSV file using pandas.
         """
         # Convert the metadata list to a pandas DataFrame
-        patch_metadata_df = pd.DataFrame(self.patch_metadata)
+        patch_metadata_df = pd.DataFrame(self.patch_metadata).sort_values(
+            by=['row', 'column'], ascending=[True, True])
 
         # Save the DataFrame to a CSV file
         patch_metadata_df.to_csv(
