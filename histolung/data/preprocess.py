@@ -1,6 +1,7 @@
 import click
 import logging
 from pathlib import Path
+import json
 
 from histolung.utils.yaml import load_yaml_with_env
 from histolung.data.histoqc import run_histoqc
@@ -84,6 +85,41 @@ def rename_masks_task(dataset):
 
 
 @cli.command()
+def write_tiles_metadata():
+    """Store metatdata about tiles path, label for the dataloader"""
+    tiles_basedir = Path(config["tiles_basedir"])
+    preprocessed_datasets = [
+        f.name for f in tiles_basedir.iterdir() if f.is_dir()
+    ]
+    wsi_data = []
+    for dataset in preprocessed_datasets:
+        dataset_config = config["datasets"].get(dataset)
+        tiled_data_dir = tiles_basedir / dataset
+        label = dataset_config.get("label")
+        for wsi_id_dir in tiled_data_dir.iterdir():
+            if wsi_id_dir.is_dir():
+                patch_dir = wsi_id_dir / "tiles"
+                if patch_dir.exists():
+                    patch_files = [str(p) for p in patch_dir.glob("*.png")]
+                    if len(patch_files) == 0:
+                        logger.warning(f"WSI in dataset {dataset} and with "
+                                       f"ID {wsi_id_dir.name} has not tiles "
+                                       f"thus it has been discarded.")
+                        continue
+                    wsi_data.append({
+                        "wsi_id": wsi_id_dir.name,
+                        "label": label,
+                        "patch_dir": str(patch_dir),
+                        "patch_files": patch_files,
+                    })
+    output_json = tiles_basedir / "tiles_metadata.json"
+    with open(output_json, 'w') as f:
+        json.dump(wsi_data, f, indent=4)
+
+    logger.info(f"Writing tiles metadata to {output_json}")
+
+
+@cli.command()
 @click.option("--dataset",
               required=True,
               help="Dataset name (e.g., 'tcga_luad')")
@@ -153,6 +189,7 @@ def process_dataset(dataset):
     ctx.invoke(run_histoqc_task, dataset=dataset)
     ctx.invoke(rename_masks_task, dataset=dataset)
     ctx.invoke(tile_wsi_task, dataset=dataset)
+    ctx.invoke(write_tiles_metadata)
 
     logger.info(f"Completed preprocessing for dataset: {dataset}")
 

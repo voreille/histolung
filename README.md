@@ -19,6 +19,10 @@ A short description of the project.
 - [ ] Include MLFlow
 - [ ] Implement a system to map embeddings with a set of parameters
 
+Task: implement MIL from embeddings
+progress: Check pytorch lighting, in 'train_from_embeddings_old.py', adapt the run_experiments.py
+
+Task: implement hyperparamter searching
 
 Task: check tissue folding tcga_lusc ID:TCGA-21-1080-01Z-00-DX1
 

@@ -1,0 +1,80 @@
+# Model configuration section
+feature_extractor:
+  name: UNI
+  kwargs:
+    weights_filepath: models/uni/assets/ckpts/vit_large_patch16_224.dinov2.uni_mass100k/pytorch_model.bin
+    freeze_weights: true # Whether to freeze the feature extractor
+
+aggregator:
+  name: attention # Pooling algorithm (e.g., attention, mean)
+  kwargs:
+    projection_dim: 128 # Dimension of the projection in the aggregator
+    num_classes: 2 # Number of output classes (binary classification)
+    dropout: 0.2
+
+# Training configuration section
+training:
+  epochs: 100 # Number of training epochs
+  batch_size: 512 # Batch size for DataLoader
+  learning_rate: 0.001 # Learning rate for the optimizer
+  optimizer: Adam # Optimizer to use (adam, sgd, etc.)
+  optimizer_kwargs:
+    amsgrad: true
+    betas:
+      - 0.9
+      - 0.999
+    eps: 1.0e-08
+    lr: 0.0003
+    weight_decay: 0.0001
+  scheduler: true # Whether to use a learning rate scheduler
+  device: cuda # Device to use for training (cpu or cuda)
+  loss: BCEWithLogitsLoss
+  loss_kwargs:
+    weight:
+      - 0.824
+      # - 0.47
+      - 0.809
+      # - 0.742
+  early_stop_patience: 15
+  lr_scheduler: CosineAnnealingLR
+  lr_scheduler_args:
+    T_max: 10
+    eta_min: 3.0e-05
+  resume_training: false
+
+# Data configuration section
+data:
+  data_path: data/interim/tiles 
+  tiles_metadata: data/interim/tiles/tiles_metadata.json
+  magnification: "10"
+  image_size: 224 # Input image size (square)
+  augmentations: # Data augmentation settings
+    horizontal_flip: true # Whether to apply horizontal flip augmentation
+    vertical_flip: false # Whether to apply vertical flip augmentation
+    rotation: 15 # Max rotation angle for augmentation
+  mean: # Mean and std by channel
+    - 0.485
+    - 0.456
+    - 0.406
+  std:
+    - 0.229
+    - 0.224
+    - 0.225
+  embedding_file: "data/embeddings/uni_embeddings.h5"
+  label_map:
+    lusc: 0
+    luad: 1
+# Miscellaneous settings
+misc:
+  seed: 42 # Random seed for reproducibility
+  logging: true # Whether to enable logging during training
+  save_model: true # Whether to save the model after training
+  model_save_path: ./models/mil_model.pth # Path to save the trained model
+
+run:
+  experiment_name: "UNI_explo"
+  description: "Testing the resnet50 model with new data augmentation"
+  tags:
+    - test
+    - resnet50
+    - augmentation

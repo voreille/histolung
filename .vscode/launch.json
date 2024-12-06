@@ -1,7 +1,6 @@
 {
     "version": "0.2.0",
     "configurations": [
-
         {
             "name": "Debug run_histoqc_task",
             "type": "debugpy",
@@ -50,6 +49,16 @@
             "console": "integratedTerminal"
         },
         {
+            "name": "Debug write_tiles_metadata",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/histolung/data/preprocess.py",
+            "args": [
+                "write-tiles-metadata",
+            ],
+            "console": "integratedTerminal"
+        },
+        {
             "name": "Debug process_dataset",
             "type": "debugpy",
             "request": "launch",
@@ -60,6 +69,82 @@
                 "tcga_luad"
             ],
             "console": "integratedTerminal"
+        },
+        {
+            "name": "Generate Embeddings",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/histolung/experiments/run_experiment.py",
+            "args": [
+                "generate-embeddings",
+                "--id",
+                "experiment1",
+                "--max-wsi-debug",
+                "4",
+                "--force",
+                "--num-workers",
+                "24",
+                "--gpu-id",
+                "1",
+                "--batch-size",
+                "128"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "0,1",
+                "MLFLOW_TRACKING_URI": "http://localhost:5000",
+                "EXPERIMENT_MODE": "embedding"
+            }
+        },
+        {
+            "name": "Train Model",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/histolung/experiments/run_experiment.py",
+            "args": [
+                "train",
+                "--id",
+                "experiment1"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "0,1",
+                "MLFLOW_TRACKING_URI": "http://localhost:5000",
+                "EXPERIMENT_MODE": "train"
+            }
+        },
+        {
+            "name": "Evaluate Model",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/histolung/experiments/run_experiment.py",
+            "args": [
+                "evaluate",
+                "--id",
+                "experiment1"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "0,1",
+                "MLFLOW_TRACKING_URI": "http://localhost:5000",
+                "EXPERIMENT_MODE": "evaluate"
+            }
+        },
+        {
+            "name": "Run Complete Experiment",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/histolung/experiments/run_experiment.py",
+            "args": [
+                "run",
+                "--id",
+                "experiment1"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true
         },
         {
             "name": "Debug current file",
