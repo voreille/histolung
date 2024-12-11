@@ -37,7 +37,7 @@ training:
       # - 0.742
   early_stop_patience: 15
   lr_scheduler: CosineAnnealingLR
-  lr_scheduler_args:
+  lr_scheduler_kwargs:
     T_max: 10
     eta_min: 3.0e-05
   resume_training: false

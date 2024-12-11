@@ -9,40 +9,6 @@ import torchvision.models as models
 from .feature_extractor import BaseFeatureExtractor
 
 
-def load_pretrained_model(model_name: str, keep_last_layer=False):
-    """Loads the specified pre-trained model and returns the model and input features."""
-    model_dict = {
-        "resnet50": (models.resnet50, models.ResNet50_Weights.DEFAULT, 224),
-        "resnet34": (models.resnet34, models.ResNet34_Weights.DEFAULT, 224),
-        "resnet101": (models.resnet101, models.ResNet101_Weights.DEFAULT, 224),
-        "convnext": (models.convnext_small, 'DEFAULT', 224),
-        "swin": (models.swin_v2_t, models.Swin_V2_T_Weights.DEFAULT, 224),
-        "efficient": (models.efficientnet_b0, 'DEFAULT', 224),
-    }
-
-    if model_name.lower() not in model_dict:
-        raise ValueError(
-            f"Invalid model name: {model_name}. Choose from {list(model_dict.keys())}"
-        )
-
-    model_class, weights, image_size = model_dict[model_name.lower()]
-    model = model_class(weights=weights)
-
-    # Extract input features from the appropriate layer before modifying the last layer
-    feature_dim = model.fc.in_features if hasattr(
-        model, 'fc') else model.classifier[-1].in_features
-
-    # Remove the last layer if keep_last_layer is False
-    if not keep_last_layer:
-        if hasattr(model, 'fc'):  # For models like ResNet
-            model.fc = nn.Identity()  # Replaces the fully connected layer
-        elif hasattr(model,
-                     'classifier'):  # For models like EfficientNet, ConvNext
-            model.classifier = nn.Identity()
-
-    return model, feature_dim, image_size
-
-
 # Example of attention-based aggregator
 class BaseAggregator(nn.Module):
 
@@ -224,3 +190,37 @@ class MILModel(nn.Module):
             pred_scores.detach().cpu().numpy(),
             attention.detach().cpu().numpy(),
         )
+
+
+def load_pretrained_model(model_name: str, keep_last_layer=False):
+    """Loads the specified pre-trained model and returns the model and input features."""
+    model_dict = {
+        "resnet50": (models.resnet50, models.ResNet50_Weights.DEFAULT, 224),
+        "resnet34": (models.resnet34, models.ResNet34_Weights.DEFAULT, 224),
+        "resnet101": (models.resnet101, models.ResNet101_Weights.DEFAULT, 224),
+        "convnext": (models.convnext_small, 'DEFAULT', 224),
+        "swin": (models.swin_v2_t, models.Swin_V2_T_Weights.DEFAULT, 224),
+        "efficient": (models.efficientnet_b0, 'DEFAULT', 224),
+    }
+
+    if model_name.lower() not in model_dict:
+        raise ValueError(
+            f"Invalid model name: {model_name}. Choose from {list(model_dict.keys())}"
+        )
+
+    model_class, weights, image_size = model_dict[model_name.lower()]
+    model = model_class(weights=weights)
+
+    # Extract input features from the appropriate layer before modifying the last layer
+    feature_dim = model.fc.in_features if hasattr(
+        model, 'fc') else model.classifier[-1].in_features
+
+    # Remove the last layer if keep_last_layer is False
+    if not keep_last_layer:
+        if hasattr(model, 'fc'):  # For models like ResNet
+            model.fc = nn.Identity()  # Replaces the fully connected layer
+        elif hasattr(model,
+                     'classifier'):  # For models like EfficientNet, ConvNext
+            model.classifier = nn.Identity()
+
+    return model, feature_dim, image_size

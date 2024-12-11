@@ -38,7 +38,7 @@ def split_by_fold(wsi_metadata, fold_df):
     return output, n_folds
 
 
-def get_loss_function(loss_name, device="gpu", **kwargs):
+def get_loss_function(loss_name, **kwargs):
     loss_dict = {
         "BCEWithLogitsLoss": BCEWithLogitsLoss,
         "FocalBinaryCrossEntropy": FocalBCEWithLogitsLoss,
@@ -54,14 +54,26 @@ def get_loss_function(loss_name, device="gpu", **kwargs):
 
     # Check if 'weight' is in kwargs and convert it to a tensor
     if 'weight' in kwargs and not isinstance(kwargs['weight'], torch.Tensor):
-        kwargs['weight'] = torch.tensor(kwargs['weight'],
-                                        dtype=torch.float,
-                                        device=device)
+        kwargs['weight'] = torch.tensor(
+            kwargs['weight'],
+            dtype=torch.float,
+        )
 
     return loss_class(**kwargs)
 
 
-def get_optimizer(net, optimizer_name, **kwargs):
+def get_optimizer(parameters, optimizer_name, **kwargs):
+    """
+    Factory function to create an optimizer.
+
+    Args:
+        name (str): Name of the optimizer (e.g., "adam", "sgd").
+        parameters: Model's parameters to optimize.
+        **kwargs: Additional arguments for the optimizer.
+
+    Returns:
+        torch.optim.Optimizer: The instantiated optimizer.
+    """
     optimizer_dict = {
         "Adam": Adam,
         "AdamW": AdamW,
@@ -76,7 +88,41 @@ def get_optimizer(net, optimizer_name, **kwargs):
     if optimizer_class is None:
         raise ValueError(f"Optimizer '{optimizer_name}' not supported")
 
-    return optimizer_class(net.parameters(), **kwargs)
+    return optimizer_class(parameters, **kwargs)
+
+
+def get_scheduler(optimizer, name, **kwargs):
+    """
+    Factory function to create a learning rate scheduler.
+
+    Args:
+        name (str): Name of the scheduler (e.g., "StepLR", "CosineAnnealingLR").
+        optimizer: Optimizer to attach the scheduler to.
+        **kwargs: Additional arguments for the scheduler.
+
+    Returns:
+        torch.optim.lr_scheduler._LRScheduler or dict: The instantiated scheduler.
+    """
+
+    schedulers_dict = {
+        "StepLR": torch.optim.lr_scheduler.StepLR,
+        "CosineAnnealingLR": torch.optim.lr_scheduler.CosineAnnealingLR,
+        "ReduceLROnPlateau": torch.optim.lr_scheduler.ReduceLROnPlateau,
+    }
+
+    scheduler_class = schedulers_dict.get(name)
+    if scheduler_class is None:
+        raise ValueError(f"Unsupported scheduler: {name}")
+
+    if name == "ReduceLROnPlateau":
+        return {
+            "scheduler": scheduler_class(optimizer, **kwargs),
+            "monitor": kwargs.get("monitor", "val_loss"),
+            "interval": kwargs.get("interval", "epoch"),
+            "frequency": kwargs.get("frequency", 1),
+        }
+
+    return scheduler_class(optimizer, **kwargs)
 
 
 def get_wsi_dataloaders(wsi_metadata_by_folds, fold, label_map, batch_size=2):
