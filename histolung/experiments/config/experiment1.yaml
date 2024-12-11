@@ -7,6 +7,7 @@ feature_extractor:
 
 aggregator:
   name: attention # Pooling algorithm (e.g., attention, mean)
+  checkpoints_dir: models/MIL/
   kwargs:
     projection_dim: 128 # Dimension of the projection in the aggregator
     num_classes: 2 # Number of output classes (binary classification)
@@ -69,12 +70,11 @@ misc:
   seed: 42 # Random seed for reproducibility
   logging: true # Whether to enable logging during training
   save_model: true # Whether to save the model after training
-  model_save_path: ./models/mil_model.pth # Path to save the trained model
 
 run:
-  experiment_name: "UNI_explo"
+  experiment_name: "experiment1"
   description: "Testing the resnet50 model with new data augmentation"
   tags:
     - test
-    - resnet50
+    - UNI
     - augmentation

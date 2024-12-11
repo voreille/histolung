@@ -2,18 +2,16 @@ import os
 from pathlib import Path
 import json
 
-import h5py
 import mlflow
 import click
 import torch
 from pytorch_lightning.loggers import MLFlowLogger
+from pytorch_lightning import Trainer
 import pandas as pd
 
-from histolung.models.models import MILModel
-from histolung.mil.mil_trainer import EmbeddingMILTrainer
+from histolung.models.pl_models import AggregatorPL
 from histolung.mil.embedding_manager import EmbeddingManager
-from histolung.mil.utils import (get_wsi_dataloaders, get_loss_function,
-                                 get_optimizer)
+from histolung.mil.utils import get_embedding_dataloaders
 from histolung.utils import yaml_load
 
 project_dir = Path(__file__).resolve().parents[2]
@@ -69,13 +67,46 @@ def generate_embeddings_if_needed(
         click.echo("Embeddings already exist. Skipping embedding generation.")
 
 
-def train_total(experiment_id):
+def get_dataloaders(wsi_metadata_by_folds, fold, hdf5_path, batch_size=1):
+    wsi_meta_train = [
+        wsi for i, wsi_fold in enumerate(wsi_metadata_by_folds) if i != fold
+        for wsi in wsi_fold
+    ]
+    wsi_meta_val = wsi_metadata_by_folds[fold]
+
+    wsi_ids_train = [k for k in wsi_meta_train["wsi_id"]]
+    labels_train = [k for k in wsi_meta_train["label"]]
+
+    wsi_ids_val = [k for k in wsi_meta_val["wsi_id"]]
+    labels_val = [k for k in wsi_meta_val["label"]]
+
+    wsi_dataloader_train = get_embedding_dataloaders(
+        wsi_ids_train,
+        labels_train,
+        hdf5_path,
+        batch_size=batch_size,
+        preloading=True,
+        shuffle=True,
+    )
+    wsi_dataloader_val = get_embedding_dataloaders(
+        wsi_ids_val,
+        labels_val,
+        hdf5_path,
+        batch_size=batch_size,
+        preloading=True,
+        shuffle=False,
+    )
+    return {
+        "train": wsi_dataloader_train,
+        "validation": wsi_dataloader_val,
+    }
+
+
+def train_total(config):
     # Load configuration file
-    config_path = f'./experiments/config/{experiment_id}.yaml'
-    config = yaml_load(config_path)
 
     # Set up MLFlow logging
-    mlflow.set_experiment(config['experiment_name'])
+    mlflow.set_experiment(config["run"]["experiment_name"])
     mlflow_logger = MLFlowLogger(experiment_name=config['experiment_name'])
 
     # Set up logging
@@ -92,57 +123,40 @@ def train_total(experiment_id):
 
     # Open HDF5 file for reading embeddings
     hdf5_path = embedding_manager.get_embedding_path()
-    with h5py.File(hdf5_path, 'r') as hdf5_file:
 
-        # Loop over each fold
-        for fold in range(n_folds):
-            click.echo(f"Processing fold {fold + 1}/{n_folds}")
+    # Loop over each fold
+    for fold in range(n_folds):
+        click.echo(f"Processing fold {fold + 1}/{n_folds}")
 
-            # Load the model from configuration
-            model = MILModel.from_config(config_path)
+        # Load the model from configuration
+        model = AggregatorPL.from_config(config)
+        dataloaders = get_dataloaders(
+            wsi_metadata_by_folds,
+            fold,
+            hdf5_path,
+            batch_size=config["training"]["batch_size"],
+        )
+        trainer = Trainer(
+            max_epochs=config["training"]["epochs"],
+            logger=mlflow_logger,
+            gpus=device,
+            deterministic=True,
+            log_every_n_steps=10,
+        )
+        # Train the model
+        click.echo(f"Starting training for fold {fold + 1}")
+        trainer.fit(model, dataloaders["train"], dataloaders["val"])
+        click.echo(f"Completed training for fold {fold + 1}")
 
-            # Get the DataLoaders for the current fold
-            wsi_dataloaders = get_wsi_dataloaders(
-                wsi_metadata_by_folds,
-                fold,
-                config["data"]["label_map"],
-                batch_size=config["training"]["batch_size"])
-
-            # Set up optimizer and loss function
-            optimizer = get_optimizer(
-                model,
-                config["training"]["optimizer"],
-                **config["training"]["optimizer_kwargs"],
-            )
-            loss_fn = get_loss_function(
-                config["training"]["loss"],
-                device=device,
-                **config["training"]["loss_kwargs"],
-            )
-
-            # Initialize the trainer
-            trainer = EmbeddingMILTrainer(
-                model,
-                wsi_dataloaders,
-                optimizer,
-                loss_fn,
-                device=device,
-                hdf5_file=hdf5_file,
-                training_cfg=config["training"],
-            )
-
-            # Train the model
-            click.echo(f"Starting training for fold {fold + 1}")
-            training_losses, validation_losses = trainer.train(
-                config["training"]["epochs"])
-            click.echo(f"Completed training for fold {fold + 1}")
-
-            # Save the model
-            model_save_path = Path(config['checkpoint_dir']
-                                   ) / f"weights/mil_model_fold_{fold + 1}.pth"
-            model_save_path.parent.mkdir(parents=True, exist_ok=True)
-            torch.save(model.state_dict(), model_save_path)
-            click.echo(f"Model for fold {fold + 1} saved to {model_save_path}")
+        # Save the model
+        experiment_name = config["run"]["experiment_name"]
+        model_save_path = (project_dir /
+                           config["feature_aggregator"]["checkpoints_dir"] /
+                           f"{experiment_name}" /
+                           f"weights/mil_model_fold_{fold + 1}.ckpt")
+        model_save_path.parent.mkdir(parents=True, exist_ok=True)
+        trainer.save_checkpoint(model_save_path)
+        click.echo(f"Model for fold {fold + 1} saved to {model_save_path}")
 
 
 # Helper function to train the model if checkpoint does not already exist
@@ -152,7 +166,9 @@ def train_model_if_needed(config, experiment_id, mlflow_logger=None):
                                    f"{experiment_id}.ckpt")
     if not os.path.exists(checkpoint_path):
         click.echo(f"Training model for experiment {experiment_id}...")
-        train_total(experiment_id)
+
+        train_total(config)
+
         if mlflow_logger:
             mlflow_logger.experiment.log_artifact(mlflow_logger.run_id,
                                                   checkpoint_path)
@@ -248,7 +264,7 @@ def generate_embeddings(
               help='ID of the experiment to train.')
 def train(experiment_id):
     """Train a model using the specified experiment configuration."""
-    config_path = f'./experiments/config/{experiment_id}.yaml'
+    config_path = project_dir / f'histolung/experiments/config/{experiment_id}.yaml'
     config = yaml_load(config_path)
 
     # Check if embeddings exist before training

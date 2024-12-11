@@ -156,14 +156,13 @@ class AttentionAggregatorPL(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        wsi_ids, labels = batch
+        _, embeddings, labels = batch
         labels = labels.to(self.device)
         batch_outputs = []
 
-        for wsi_id in wsi_ids:
-            embeddings = self.get_embeddings(wsi_id)
-            outputs, _ = self(embeddings)
-            batch_outputs.append(outputs)
+        for embedding in embeddings:
+            output, _ = self(embedding)
+            batch_outputs.append(output)
 
         batch_outputs = torch.stack(batch_outputs)
         labels_one_hot = F.one_hot(labels, num_classes=self.num_classes)
@@ -178,11 +177,6 @@ class AttentionAggregatorPL(pl.LightningModule):
         loss = self.loss_fn(preds, y)
         self.log("test_loss", loss)
         return loss
-
-    def get_embeddings(self, wsi_id):
-        embeddings = torch.tensor(self.hdf5_file['embeddings'][wsi_id][:]).to(
-            self.device)
-        return embeddings
 
     def configure_optimizers(self):
 

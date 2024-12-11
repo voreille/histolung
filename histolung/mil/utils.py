@@ -9,7 +9,7 @@ from torch.optim import Adam, SGD, AdamW, RMSprop
 from torch.utils.data import DataLoader
 
 from histolung.mil.loss import FocalBCEWithLogitsLoss
-from histolung.mil.data_loader import WSIDataset
+from histolung.mil.data_loader import WSIDataset, EmbeddingDataset
 
 
 def load_metadata(project_dir):
@@ -152,6 +152,31 @@ def get_wsi_dataloaders(wsi_metadata_by_folds, fold, label_map, batch_size=2):
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
     return {"train": train_loader, "val": val_loader}
+
+
+def collate_fn_ragged(batch):
+    wsi_ids, embeddings, labels = zip(*batch)
+    return list(wsi_ids), list(embeddings), torch.tensor(labels)
+
+
+def get_embedding_dataloaders(
+    wsi_ids,
+    labels,
+    hdf5_filepath,
+    batch_size=1,
+    preloading=True,
+    shuffle=True,
+):
+    dataset = EmbeddingDataset(
+        hdf5_filepath,
+        wsi_ids,
+        labels,
+        preloading=preloading,
+    )
+    return DataLoader(dataset,
+                      batch_size=batch_size,
+                      shuffle=shuffle,
+                      collate_fn=collate_fn_ragged)
 
 
 def get_preprocessing(data_cfg):

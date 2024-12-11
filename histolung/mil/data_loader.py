@@ -138,3 +138,49 @@ class HDF5EmbeddingDataset(Dataset):
     def __del__(self):
         """Ensure the HDF5 file is closed when the dataset object is deleted."""
         self.close_hdf5()
+
+
+class EmbeddingDataset(Dataset):
+    """
+    Dataset class for handling WSIs with an option for preloading embeddings.
+
+    Args:
+        hdf5_filepath (str): Path to the HDF5 file containing embeddings.
+        wsi_ids (list of str): List of WSI IDs corresponding to the embeddings.
+        labels (list of int): List of labels for each WSI.
+        preloading (bool): If True, preload all embeddings into memory.
+    """
+    def __init__(self, hdf5_filepath, wsi_ids, labels, preloading=False):
+        self.hdf5_filepath = hdf5_filepath
+        self.wsi_ids = wsi_ids
+        self.labels = labels
+        self.preloading = preloading
+        self.embeddings = None
+
+        if self.preloading:
+            self.embeddings = {}
+            self._preload_embeddings()
+
+    def _preload_embeddings(self):
+        """Preload all embeddings into memory."""
+        print("Preloading embeddings into memory...")
+        with h5py.File(self.hdf5_filepath, 'r') as hdf5_file:
+            for wsi_id in self.wsi_ids:
+                self.embeddings[wsi_id] = torch.tensor(hdf5_file['embeddings'][wsi_id][:])
+        print("Preloading complete.")
+
+    def __len__(self):
+        return len(self.wsi_ids)
+
+    def __getitem__(self, idx):
+        wsi_id = self.wsi_ids[idx]
+        label = self.labels[idx]
+
+        if self.preloading:
+            embeddings = self.embeddings[wsi_id]
+        else:
+            # Load embeddings on demand
+            with h5py.File(self.hdf5_filepath, 'r') as hdf5_file:
+                embeddings = torch.tensor(hdf5_file['embeddings'][wsi_id][:])
+
+        return wsi_id, embeddings, label
