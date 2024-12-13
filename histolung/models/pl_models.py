@@ -6,6 +6,7 @@ import pytorch_lightning as pl
 from torch import nn
 from torch.optim import Adam, SGD, AdamW, RMSprop
 import torch.nn.functional as F
+from torchmetrics.classification import Accuracy
 
 from histolung.mil.utils import get_optimizer, get_scheduler, get_loss_function
 
@@ -129,6 +130,18 @@ class AttentionAggregatorPL(AggregatorPL):
         self.fc = nn.Linear(hidden_dim, num_classes)
         self.loss_fn = get_loss_function(loss, **loss_kwargs)
 
+        # Metrics:
+        self.train_accuracy = Accuracy(
+            num_classes=num_classes,
+            average='macro',
+            task="multiclass",
+        )
+        self.val_accuracy = Accuracy(
+            num_classes=num_classes,
+            average='macro',
+            task="multiclass",
+        )
+
     def forward(self, x):
         x = self.projection_layer(x)
         attention = self.attention(x)
@@ -154,12 +167,21 @@ class AttentionAggregatorPL(AggregatorPL):
         batch_outputs = torch.stack(batch_outputs)
         loss = self.loss_fn(batch_outputs, labels.float())
 
+        # Compute accuracy
+        # preds = torch.argmax(batch_outputs, dim=-1)
+        self.train_accuracy(batch_outputs, labels)
+
+        # Log metrics
         self.log('train_loss',
                  loss,
                  on_step=True,
                  on_epoch=True,
-                 prog_bar=True,
-                 batch_size=len(embeddings))
+                 prog_bar=True)
+        self.log('train_acc',
+                 self.train_accuracy,
+                 on_step=True,
+                 on_epoch=True,
+                 prog_bar=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -174,13 +196,17 @@ class AttentionAggregatorPL(AggregatorPL):
         batch_outputs = torch.stack(batch_outputs)
         loss = self.loss_fn(batch_outputs, labels.float())
 
-        self.log('val_loss',
-                 loss,
+        # Compute accuracy
+        # preds = torch.argmax(batch_outputs, dim=-1)
+        self.val_accuracy(batch_outputs, labels)
+
+        # Log metrics
+        self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log('val_acc',
+                 self.val_accuracy,
                  on_step=False,
                  on_epoch=True,
-                 prog_bar=True,
-                 batch_size=len(embeddings))
-        return loss
+                 prog_bar=True)
 
     def test_step(self, batch, batch_idx):
         x, y = batch

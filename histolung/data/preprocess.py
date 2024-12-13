@@ -9,8 +9,6 @@ from histolung.data.histoqc import run_histoqc
 from histolung.data.rename import rename_masks_with_copy, write_wsi_paths_to_csv
 from histolung.data.tiling import tile_dataset
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Base directory and configuration loading
@@ -22,31 +20,49 @@ masks_basedir = project_dir / config["histoqc_masks_basedir"]
 tiles_basedir = project_dir / config["tiles_basedir"]
 
 
-def configure_task_logger(task_name, dataset=None):
-    """Configure logging to a file specific to the task and dataset."""
+def configure_task_logger(task_name, dataset=None, debug_id=None):
+    """Set up logging with dynamic file path and format."""
     logs_dir = project_dir / "logs/data"
     logs_dir.mkdir(parents=True, exist_ok=True)
 
-    current_date = datetime.now().strftime("%Y-%m-%d")
-    log_filename = f"{current_date}_{task_name}"
+    # Include date, time, and task-specific information in the log file name
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    log_filename = f"{timestamp}__{task_name}"
     if dataset:
         log_filename += f"__{dataset}"
+    if debug_id:
+        log_filename += "__debug"
     log_filename += ".log"
 
     log_path = logs_dir / log_filename
+
+    # Create root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+
+    # Clear existing handlers to prevent duplicates
+    if root_logger.hasHandlers():
+        root_logger.handlers.clear()
+
+    # File handler
     file_handler = logging.FileHandler(log_path)
     file_handler.setLevel(logging.INFO)
-    formatter = logging.Formatter(
+    file_formatter = logging.Formatter(
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    file_handler.setFormatter(formatter)
+    file_handler.setFormatter(file_formatter)
 
-    # Clear previous handlers and set the file handler
-    logger.handlers.clear()
-    logger.addHandler(file_handler)
-    logger.addHandler(logging.StreamHandler())
+    # Stream handler (for console output)
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(logging.INFO)
+    stream_formatter = logging.Formatter("%(asctime)s - %(message)s")
+    stream_handler.setFormatter(stream_formatter)
 
-    logger.info(
-        f"Logging configured for task '{task_name}' with dataset '{dataset}'.")
+    # Add handlers
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(stream_handler)
+
+    root_logger.info(
+        f"Logging configured for task '{task_name}' (dataset: {dataset}).")
 
 
 @click.group()
@@ -216,6 +232,7 @@ def tile_wsi_task(
               help="Dataset name to process (e.g., 'tcga_luad')")
 def process_dataset(dataset):
     """Run full preprocessing pipeline for a dataset"""
+
     logger.info(f"Starting full preprocessing for dataset: {dataset}")
     configure_task_logger("process_dataset", dataset)
 

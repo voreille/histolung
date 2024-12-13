@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
 from multiprocessing.pool import ThreadPool, Pool
+from datetime import datetime
 
 import pandas as pd
 from tqdm import tqdm
@@ -21,7 +22,7 @@ output_basedir = project_dir / ("data/interim/debug_tiles"
                                 if DEBUG else config["tiles_basedir"])
 output_basedir.mkdir(exist_ok=True)
 
-# Base logger setup
+# Configure logger
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
@@ -38,6 +39,7 @@ def process_wsi(
     save_tile_overlay=False,
     save_metadata=True,
 ):
+    logger.info(f"Starting tiling for WSI {wsi_path.name}")
     try:
         tile_processor = WSITilerWithMask(
             wsi_path,
@@ -50,10 +52,8 @@ def process_wsi(
             save_tile_overlay=save_tile_overlay,
         )
 
-        # Define coordinates for tiles
         coordinates = tile_processor.get_coordinates()
 
-        # Multiprocessing for tile extraction with error handling
         if num_workers_tiles > 1:
             with ThreadPool(processes=num_workers_tiles) as pool:
                 results = list(
@@ -61,12 +61,8 @@ def process_wsi(
                          total=len(coordinates),
                          desc="Processing tiles"))
         else:
-            results = []
-            for coord in tqdm(coordinates):
-                result = tile_processor(coord)
-                results.append(result)
+            results = [tile_processor(coord) for coord in tqdm(coordinates)]
 
-        # Check if any results returned an exception
         if any(isinstance(res, Exception) for res in results):
             raise RuntimeError(
                 f"Error encountered in tile processing for {wsi_path.name}")
@@ -75,15 +71,13 @@ def process_wsi(
 
     except Exception as e:
         logger.error(f"Error processing WSI {wsi_path.name}: {e}")
-        return False  # Return False to indicate failure
+        return False
 
     if save_tile_overlay:
         tile_processor.save_overlay()
-
     if save_metadata:
         tile_processor.save_metadata()
-
-    return True  # Return True to indicate success
+    return True
 
 
 def tile_dataset(
@@ -97,6 +91,8 @@ def tile_dataset(
     magnification=10,
     debug_id=None,
 ):
+    dataset = masks_dir.name
+
     mask_files = [f for f in masks_dir.rglob("*mask_use.png")]
     df = pd.read_csv(Path(masks_dir) / "raw_wsi_path.csv")
     wsi_paths_mapping = {
@@ -138,7 +134,6 @@ def tile_dataset(
         ) for mask_path in mask_files
     ]
 
-    # Process WSIs in parallel
     with Pool(processes=num_workers_wsi) as pool:
         results = list(
             tqdm(pool.starmap(process_wsi, wsi_args),
