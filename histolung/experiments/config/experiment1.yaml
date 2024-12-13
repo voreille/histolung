@@ -9,14 +9,15 @@ aggregator:
   name: attention # Pooling algorithm (e.g., attention, mean)
   checkpoints_dir: models/MIL/
   kwargs:
-    projection_dim: 128 # Dimension of the projection in the aggregator
+    input_dim: 1024 # Could be inferred from the feature extractor, but fuck
+    hidden_dim: 128 # Dimension of the projection in the aggregator
     num_classes: 2 # Number of output classes (binary classification)
     dropout: 0.2
 
 # Training configuration section
 training:
   epochs: 100 # Number of training epochs
-  batch_size: 512 # Batch size for DataLoader
+  batch_size: 128 # Batch size for DataLoader
   learning_rate: 0.001 # Learning rate for the optimizer
   optimizer: Adam # Optimizer to use (adam, sgd, etc.)
   optimizer_kwargs:

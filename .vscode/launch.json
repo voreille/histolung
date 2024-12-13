@@ -35,16 +35,15 @@
             "args": [
                 "tile-wsi-task",
                 "--dataset",
-                "tcga_luad",
+                "tcga_lusc",
                 "--tile_size",
                 "224",
                 "--threshold",
                 "0.8",
                 "--num_workers",
                 "12",
-                "--save_tile_overlay",
                 "--debug_id",
-                "TCGA-55-7910-01Z-00-DX1",
+                "TCGA-66-2794-01Z-00-DX1",
             ],
             "console": "integratedTerminal"
         },
@@ -105,7 +104,11 @@
             "args": [
                 "train",
                 "--id",
-                "experiment1"
+                "experiment1",
+                "--gpu-id",
+                "1",
+                // "--debug-max-samples",
+                // "10"
             ],
             "console": "integratedTerminal",
             "justMyCode": true,

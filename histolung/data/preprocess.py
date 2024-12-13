@@ -2,6 +2,7 @@ import click
 import logging
 from pathlib import Path
 import json
+from datetime import datetime
 
 from histolung.utils.yaml import load_yaml_with_env
 from histolung.data.histoqc import run_histoqc
@@ -21,6 +22,33 @@ masks_basedir = project_dir / config["histoqc_masks_basedir"]
 tiles_basedir = project_dir / config["tiles_basedir"]
 
 
+def configure_task_logger(task_name, dataset=None):
+    """Configure logging to a file specific to the task and dataset."""
+    logs_dir = project_dir / "logs/data"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+
+    current_date = datetime.now().strftime("%Y-%m-%d")
+    log_filename = f"{current_date}_{task_name}"
+    if dataset:
+        log_filename += f"__{dataset}"
+    log_filename += ".log"
+
+    log_path = logs_dir / log_filename
+    file_handler = logging.FileHandler(log_path)
+    file_handler.setLevel(logging.INFO)
+    formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    file_handler.setFormatter(formatter)
+
+    # Clear previous handlers and set the file handler
+    logger.handlers.clear()
+    logger.addHandler(file_handler)
+    logger.addHandler(logging.StreamHandler())
+
+    logger.info(
+        f"Logging configured for task '{task_name}' with dataset '{dataset}'.")
+
+
 @click.group()
 def cli():
     """Preprocess datasets with various tasks"""
@@ -37,7 +65,10 @@ def cli():
               help="Number of workers for parallel processing")
 def run_histoqc_task(dataset, num_workers):
     """Run HistoQC on the specified dataset"""
+    configure_task_logger("histoqc", dataset)
     dataset_config = config["datasets"].get(dataset)
+    logger.info(f"Using data_config: {dataset_config}")
+
     if not dataset_config:
         raise click.BadParameter(
             f"Dataset '{dataset}' not found in configuration.")
@@ -64,6 +95,7 @@ def run_histoqc_task(dataset, num_workers):
               help="Dataset name (e.g., 'tcga_luad')")
 def rename_masks_task(dataset):
     """Rename mask folders according to dataset conventions"""
+    configure_task_logger("rename_masks_task", dataset)
     dataset_config = config["datasets"].get(dataset)
     if not dataset_config:
         raise click.BadParameter(
@@ -133,25 +165,27 @@ def write_tiles_metadata():
               default=1,
               show_default=True,
               help="Number of workers for parallel processing")
-@click.option('--save_tile_overlay',
-              is_flag=True,
-              help="save a PNG showing the selected tiles")
 @click.option("--debug_id", default=None, help="WSI ID used for debugging.")
 def tile_wsi_task(
     dataset,
     tile_size,
     threshold,
     num_workers,
-    save_tile_overlay,
     debug_id=None,
 ):
     """Tile WSIs for the specified dataset"""
+    # if debug_id is not None:
+    if debug_id:
+        configure_task_logger("tile_wsi_task", dataset + "__debug")
+    else:
+        configure_task_logger("tile_wsi_task", dataset)
+
     dataset_config = config["datasets"].get(dataset)
     if not dataset_config:
         raise click.BadParameter(
             f"Dataset '{dataset}' not found in configuration.")
 
-    data_dir = Path(dataset_config["data_dir"])
+    # data_dir = Path(dataset_config["data_dir"])
     masks_dir = masks_basedir / dataset
     if debug_id:
         _tiles_basedir = tiles_basedir.parent / f"debug_{tiles_basedir.name}"
@@ -169,7 +203,7 @@ def tile_wsi_task(
         threshold=threshold,
         num_workers_tiles=4,
         num_workers_wsi=num_workers,
-        save_tile_overlay=save_tile_overlay,
+        save_tile_overlay=True,
         debug_id=debug_id,
         magnification=dataset_config["magnification"],
     )
@@ -183,6 +217,7 @@ def tile_wsi_task(
 def process_dataset(dataset):
     """Run full preprocessing pipeline for a dataset"""
     logger.info(f"Starting full preprocessing for dataset: {dataset}")
+    configure_task_logger("process_dataset", dataset)
 
     # Run all tasks in sequence for the dataset
     ctx = click.get_current_context()

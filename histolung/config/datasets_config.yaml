@@ -12,13 +12,13 @@ datasets:
     magnification: 10
     label: "LUSC"
   cptac_lscc:
-    data_dir: "${CPTAC_DATA_RAW_PATH}/cptac_lscc"
+    data_dir: "${CPTAC_DATA_RAW_PATH}/CPTAC-LSCC_v10/LSCC"
     input_pattern: "*.svs"
     histoqc_config_path: "histolung/config/HistoQC/config_light.ini"
     magnification: 10
     label: "LUSC"
   cptac_luad:
-    data_dir: "${CPTAC_DATA_RAW_PATH}/cptac_luad"
+    data_dir: "${CPTAC_DATA_RAW_PATH}/CPTAC-LUAD_v12/LUAD"
     input_pattern: "*.svs"
     histoqc_config_path: "histolung/config/HistoQC/config_light.ini"
     magnification: 10

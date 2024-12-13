@@ -60,8 +60,8 @@ class AggregatorPL(pl.LightningModule):
 
         # Extract common arguments
         kwargs = config["aggregator"].get("kwargs", {})
-        kwargs["input_dim"] = kwargs.get("input_dim")
-        kwargs["hidden_dim"] = kwargs.get("projection_dim")
+        # kwargs["input_dim"] = kwargs.get("input_dim")
+        # kwargs["hidden_dim"] = kwargs.get("hidden_dim")
         kwargs["num_classes"] = kwargs.get("num_classes", 2)
 
         # Include feature extractor metadata
@@ -82,12 +82,12 @@ class AggregatorPL(pl.LightningModule):
         return aggregator_cls(**kwargs, **training_params)
 
 
-class AttentionAggregatorPL(pl.LightningModule):
+class AttentionAggregatorPL(AggregatorPL):
 
     def __init__(
         self,
         input_dim,
-        hidden_dim,
+        hidden_dim=128,
         num_classes=2,
         dropout=0.2,
         optimizer="adam",
@@ -96,8 +96,14 @@ class AttentionAggregatorPL(pl.LightningModule):
         scheduler_kwargs=None,
         loss="BCEWithLogitsLoss",
         loss_kwargs=None,
+        feature_extractor=None,
     ):
-        super(AttentionAggregatorPL, self).__init__()
+        super(AttentionAggregatorPL, self).__init__(
+            input_dim,
+            hidden_dim=hidden_dim,
+            num_classes=num_classes,
+            feature_extractor=feature_extractor,
+        )
         self.optimizer_name = optimizer
         self.optimizer_kwargs = optimizer_kwargs
 
@@ -129,35 +135,36 @@ class AttentionAggregatorPL(pl.LightningModule):
         attention = torch.transpose(attention, 1, 0)
         aggregated_embedding = torch.mm(attention, x)
         aggregated_embedding = aggregated_embedding.view(
-            -1, self.hparams.hidden_dim * self.hparams.num_classes)
+            -1,
+            self.hidden_dim * self.num_classes,
+        )
         output = self.pre_fc_layer(aggregated_embedding)
         output = self.fc(output)
-        return output, attention
+        return torch.squeeze(output), attention
 
     def training_step(self, batch, batch_idx):
-        wsi_ids, labels = batch
-        labels = labels.to(self.device)
+        _, embeddings, labels = batch
+        # labels = labels.to(self.device)
         batch_outputs = []
 
-        for wsi_id in wsi_ids:
-            embeddings = self.get_embeddings(wsi_id)
-            outputs, _ = self(embeddings)
+        for embedding in embeddings:
+            outputs, _ = self(embedding)
             batch_outputs.append(outputs)
 
         batch_outputs = torch.stack(batch_outputs)
-        labels_one_hot = F.one_hot(labels, num_classes=self.num_classes)
-        loss = self.loss_fn(batch_outputs, labels_one_hot.float())
+        loss = self.loss_fn(batch_outputs, labels.float())
 
         self.log('train_loss',
                  loss,
                  on_step=True,
                  on_epoch=True,
-                 prog_bar=True)
+                 prog_bar=True,
+                 batch_size=len(embeddings))
         return loss
 
     def validation_step(self, batch, batch_idx):
         _, embeddings, labels = batch
-        labels = labels.to(self.device)
+        # labels = labels.to(self.device)
         batch_outputs = []
 
         for embedding in embeddings:
@@ -165,10 +172,14 @@ class AttentionAggregatorPL(pl.LightningModule):
             batch_outputs.append(output)
 
         batch_outputs = torch.stack(batch_outputs)
-        labels_one_hot = F.one_hot(labels, num_classes=self.num_classes)
-        loss = self.loss_fn(batch_outputs, labels_one_hot.float())
+        loss = self.loss_fn(batch_outputs, labels.float())
 
-        self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log('val_loss',
+                 loss,
+                 on_step=False,
+                 on_epoch=True,
+                 prog_bar=True,
+                 batch_size=len(embeddings))
         return loss
 
     def test_step(self, batch, batch_idx):

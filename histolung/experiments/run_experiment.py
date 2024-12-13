@@ -1,297 +1,256 @@
-import os
 from pathlib import Path
 import json
 
+import h5py
 import mlflow
 import click
-import torch
 from pytorch_lightning.loggers import MLFlowLogger
 from pytorch_lightning import Trainer
 import pandas as pd
+from sklearn.model_selection import StratifiedKFold
+import torch
+import torch.nn.functional as F
 
 from histolung.models.pl_models import AggregatorPL
 from histolung.mil.embedding_manager import EmbeddingManager
-from histolung.mil.utils import get_embedding_dataloaders
+from histolung.mil.utils import get_preloadedembedding_dataloaders
 from histolung.utils import yaml_load
 
 project_dir = Path(__file__).resolve().parents[2]
 
 
-def split_by_fold(wsi_metadata, fold_df):
-    """Split WSI metadata by fold for k-fold cross-validation."""
-    n_folds = fold_df["fold"].max() + 1
-    output = [[] for _ in range(n_folds)]
-    fold_mapping = dict(zip(fold_df['wsi_id'], fold_df['fold']))
-
-    for wsi_info in wsi_metadata:
-        fold = fold_mapping.get(wsi_info['wsi_id'])
-        if fold is not None:
-            output[fold].append(wsi_info)
-
-    return output, n_folds
+# Utility functions
+def load_and_validate_config(experiment_id):
+    config_path = project_dir / f'histolung/experiments/config/{experiment_id}.yaml'
+    if not config_path.exists():
+        raise FileNotFoundError(
+            f"Configuration file not found at {config_path}")
+    return yaml_load(config_path)
 
 
-def load_metadata():
-    """Load WSI metadata and fold information for cross-validation."""
-    fold_df = pd.read_csv(project_dir / "data/interim/tcga_folds.csv")
+def setup_logger(config):
+    mlflow.set_experiment(config["run"]["experiment_name"])
+    return MLFlowLogger(experiment_name=config["run"]['experiment_name'])
+
+
+def load_data(hdf5_path, label_map=None, debug_max_samples=None):
+
+    num_classes = len(label_map.keys())
+
     with open(project_dir / "data/interim/tcga_wsi_data.json") as f:
         wsi_metadata = json.load(f)
-    return wsi_metadata, fold_df
+
+    with h5py.File(hdf5_path, "r") as file:
+        wsi_ids_embedded = list(file["embeddings"].keys())
+
+        outputs = [(k["wsi_id"], k["label"]) for k in wsi_metadata
+                   if k["wsi_id"] in wsi_ids_embedded]
+        wsi_ids, labels = zip(*outputs)
+
+        if debug_max_samples:
+            wsi_ids = wsi_ids[:debug_max_samples]
+            labels = labels[:debug_max_samples]
+
+        embeddings = {}
+        labels_dict = {}
+        for idx, wsi_id in enumerate(wsi_ids):
+            embeddings[wsi_id] = torch.tensor(file['embeddings'][wsi_id][:])
+            label = label_map[labels[idx]]
+            labels_one_hot = F.one_hot(
+                torch.tensor(label),
+                num_classes=num_classes,
+            )
+
+            labels_dict[wsi_id] = labels_one_hot
+
+    return wsi_ids, embeddings, labels, labels_dict
 
 
-# Helper function to generate embeddings if they do not already exist
-def generate_embeddings_if_needed(
-    config,
-    mlflow_logger=None,
-    max_wsi_debug=-1,
-    force=False,
-    batch_size=32,
-    num_workers=8,
-    gpu_id=None,
-):
-    click.echo("Step 1: Generating Embeddings (if not already computed)...")
-    embedding_manager = EmbeddingManager(config,
-                                         gpu_id=gpu_id,
-                                         batch_size=batch_size,
-                                         num_workers=num_workers)
+def load_data_as_list(hdf5_path, label_map, debug_max_samples=None):
+    """
+    Preload embeddings and labels into lists for efficient access.
 
+    Args:
+        hdf5_path (str): Path to the HDF5 file containing embeddings.
+        label_map (dict): Mapping from label names to integer indices.
+        debug_max_samples (int, optional): Maximum number of samples to load for debugging.
+
+    Returns:
+        tuple: wsi_ids (list), embeddings (list), labels_one_hot_list (list)
+    """
+    num_classes = len(label_map.keys())
+
+    # Load WSI metadata
+    with open(project_dir / "data/interim/tcga_wsi_data.json") as f:
+        wsi_metadata = json.load(f)
+
+    wsi_ids = []
+    labels = []
+    embeddings = []
+    labels_one_hot_list = []
+
+    # Open the HDF5 file and preload embeddings and labels
+    with h5py.File(hdf5_path, "r") as hdf5_file:
+        wsi_ids_embedded = set(hdf5_file["embeddings"].keys())
+
+        for metadata in wsi_metadata:
+            wsi_id = metadata["wsi_id"]
+            if wsi_id in wsi_ids_embedded:
+                label = metadata["label"]
+
+                # Add to the list
+                wsi_ids.append(wsi_id)
+                labels.append(label)
+                embeddings.append(
+                    torch.tensor(hdf5_file["embeddings"][wsi_id][:]))
+                labels_one_hot_list.append(
+                    F.one_hot(torch.tensor(label_map[label]),
+                              num_classes=num_classes))
+
+                # Stop if debug_max_samples is reached
+                if debug_max_samples and len(wsi_ids) >= debug_max_samples:
+                    break
+
+    return wsi_ids, embeddings, labels, labels_one_hot_list
+
+
+def generate_embeddings_task(config, force=False, **kwargs):
+    click.echo("Generating embeddings...")
+    embedding_manager = EmbeddingManager(config, **kwargs)
     if force and embedding_manager.embeddings_exist():
         embedding_manager.delete_file()
-
     if not embedding_manager.embeddings_exist():
-        embedding_manager.generate_embeddings(max_wsi_debug=max_wsi_debug)
-        if mlflow_logger:
-            mlflow_logger.experiment.log_artifact(
-                mlflow_logger.run_id, embedding_manager.get_embedding_path())
+        embedding_manager.generate_embeddings(
+            max_wsi_debug=kwargs.get('max_wsi_debug', -1))
     else:
-        click.echo("Embeddings already exist. Skipping embedding generation.")
+        click.echo("Embeddings already exist. Skipping.")
 
 
-def get_dataloaders(wsi_metadata_by_folds, fold, hdf5_path, batch_size=1):
-    wsi_meta_train = [
-        wsi for i, wsi_fold in enumerate(wsi_metadata_by_folds) if i != fold
-        for wsi in wsi_fold
-    ]
-    wsi_meta_val = wsi_metadata_by_folds[fold]
-
-    wsi_ids_train = [k for k in wsi_meta_train["wsi_id"]]
-    labels_train = [k for k in wsi_meta_train["label"]]
-
-    wsi_ids_val = [k for k in wsi_meta_val["wsi_id"]]
-    labels_val = [k for k in wsi_meta_val["label"]]
-
-    wsi_dataloader_train = get_embedding_dataloaders(
-        wsi_ids_train,
-        labels_train,
-        hdf5_path,
-        batch_size=batch_size,
-        preloading=True,
-        shuffle=True,
-    )
-    wsi_dataloader_val = get_embedding_dataloaders(
-        wsi_ids_val,
-        labels_val,
-        hdf5_path,
-        batch_size=batch_size,
-        preloading=True,
-        shuffle=False,
-    )
-    return {
-        "train": wsi_dataloader_train,
-        "validation": wsi_dataloader_val,
-    }
-
-
-def train_total(config):
-    # Load configuration file
-
-    # Set up MLFlow logging
-    mlflow.set_experiment(config["run"]["experiment_name"])
-    mlflow_logger = MLFlowLogger(experiment_name=config['experiment_name'])
-
-    # Set up logging
-
-    # Device configuration
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-    # Load metadata and split into k-folds
-    wsi_metadata, fold_df = load_metadata()
-    wsi_metadata_by_folds, n_folds = split_by_fold(wsi_metadata, fold_df)
-
-    # Initialize EmbeddingManager
+def train_model(config,
+                gpu_id,
+                mlflow_logger=None,
+                n_folds=5,
+                debug_max_samples=None):
+    click.echo("Training model...")
     embedding_manager = EmbeddingManager(config)
-
-    # Open HDF5 file for reading embeddings
     hdf5_path = embedding_manager.get_embedding_path()
+    wsi_ids, embeddings, labels, labels_one_hot = load_data_as_list(
+        hdf5_path,
+        label_map=config["data"]["label_map"],
+        debug_max_samples=debug_max_samples,
+    )
 
-    # Loop over each fold
-    for fold in range(n_folds):
+    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    for fold, (train_index, val_index) in enumerate(skf.split(wsi_ids,
+                                                              labels)):
         click.echo(f"Processing fold {fold + 1}/{n_folds}")
-
-        # Load the model from configuration
         model = AggregatorPL.from_config(config)
-        dataloaders = get_dataloaders(
-            wsi_metadata_by_folds,
-            fold,
-            hdf5_path,
+
+        wsi_dataloader_train = get_preloadedembedding_dataloaders(
+            wsi_ids,
+            embeddings,
+            labels_one_hot,
+            train_index,
             batch_size=config["training"]["batch_size"],
+            shuffle=True,
+            num_workers=0,
+            prefetch_factor=None,
+            pin_memory=True,
+            resample=1000,
         )
+        wsi_dataloader_val = get_preloadedembedding_dataloaders(
+            wsi_ids,
+            embeddings,
+            labels_one_hot,
+            val_index,
+            batch_size=config["training"]["batch_size"],
+            shuffle=False,
+            num_workers=0,
+            prefetch_factor=None,
+            pin_memory=True,
+        )
+
         trainer = Trainer(
             max_epochs=config["training"]["epochs"],
             logger=mlflow_logger,
-            gpus=device,
             deterministic=True,
             log_every_n_steps=10,
+            accelerator="gpu",
+            devices=[gpu_id],
         )
-        # Train the model
-        click.echo(f"Starting training for fold {fold + 1}")
-        trainer.fit(model, dataloaders["train"], dataloaders["val"])
-        click.echo(f"Completed training for fold {fold + 1}")
+        trainer.fit(model, wsi_dataloader_train, wsi_dataloader_val)
 
-        # Save the model
-        experiment_name = config["run"]["experiment_name"]
-        model_save_path = (project_dir /
-                           config["feature_aggregator"]["checkpoints_dir"] /
-                           f"{experiment_name}" /
-                           f"weights/mil_model_fold_{fold + 1}.ckpt")
-        model_save_path.parent.mkdir(parents=True, exist_ok=True)
-        trainer.save_checkpoint(model_save_path)
-        click.echo(f"Model for fold {fold + 1} saved to {model_save_path}")
+        checkpoint_dir = Path(config["aggregator"]["checkpoints_dir"])
+        checkpoint_path = checkpoint_dir / f"weights/mil_model_fold_{fold + 1}.ckpt"
+        checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+        trainer.save_checkpoint(checkpoint_path)
+        click.echo(f"Model for fold {fold + 1} saved to {checkpoint_path}")
 
 
-# Helper function to train the model if checkpoint does not already exist
-def train_model_if_needed(config, experiment_id, mlflow_logger=None):
-    click.echo("Step 1: Training the Model (if not already trained)...")
-    checkpoint_path = os.path.join(config['checkpoint_dir'],
-                                   f"{experiment_id}.ckpt")
-    if not os.path.exists(checkpoint_path):
-        click.echo(f"Training model for experiment {experiment_id}...")
-
-        train_total(config)
-
-        if mlflow_logger:
-            mlflow_logger.experiment.log_artifact(mlflow_logger.run_id,
-                                                  checkpoint_path)
-    else:
-        click.echo("Model checkpoint already exists. Skipping training.")
-
-
-# Helper function to evaluate the model if a checkpoint exists
-def evaluate_model(config, experiment_id, mlflow_logger=None):
-    click.echo("Step 2: Evaluating the Model...")
-    checkpoint_path = os.path.join(config['checkpoint_dir'],
-                                   f"{experiment_id}.ckpt")
-    if not os.path.exists(checkpoint_path):
-        click.echo("No checkpoint found. Please train the model first.")
+def evaluate_model(config, experiment_id):
+    click.echo("Evaluating model...")
+    checkpoint_path = Path(config['feature_aggregator']
+                           ['checkpoints_dir']) / f"{experiment_id}.ckpt"
+    if not checkpoint_path.exists():
+        click.echo("Checkpoint not found. Train the model first.")
         return
-
-    # Load the model and evaluate
-    click.echo(f"Evaluating model for experiment {experiment_id}...")
-    click.echo(f"But not yet implemented...")
+    # Load and evaluate model here
+    click.echo("Evaluation not yet implemented.")
 
 
+# CLI commands
 @click.group()
 def cli():
-    """CLI for managing experiments involving embedding generation, training, and evaluation."""
+    """CLI for managing experiments."""
     pass
 
 
 @cli.command()
-@click.option('--id',
-              'experiment_id',
-              required=True,
-              help='ID of the experiment to run.')
-def run(experiment_id):
-    """Run an entire experiment: generate embeddings, train the model, and evaluate it."""
-
-    # Load configuration file
-    config_path = f'./experiments/config/{experiment_id}.yaml'
-    config = yaml_load(config_path)
-
-    # Set up MLFlow logging
-    mlflow.set_experiment(config['experiment_name'])
-    mlflow_logger = MLFlowLogger(experiment_name=config['experiment_name'])
-
-    with mlflow.start_run(run_name=experiment_id) as run:
-        mlflow.log_params(config)
-
-        # Run all three steps in sequence: embeddings, training, evaluation
-        train_model_if_needed(config, experiment_id, mlflow_logger)
-        evaluate_model(config, experiment_id, mlflow_logger)
-
-
-@cli.command()
-@click.option('--id',
-              'experiment_id',
-              required=True,
-              help='ID of the experiment.')
-@click.option('--gpu-id', required=True, help='ID of the GPU.')
+@click.option('--id', 'experiment_id', required=True, help='Experiment ID.')
+@click.option('--force', is_flag=True, help='Force embedding regeneration.')
+@click.option('--gpu-id', default=0, help='GPU ID for embedding generation.')
 @click.option('--batch-size',
-              required=False,
               default=32,
-              help='ID of the GPU.')
+              help='Batch size for embedding generation.')
 @click.option('--num-workers',
-              required=False,
               default=8,
-              help='ID of the GPU.')
-@click.option("--max-wsi-debug", default=-1)
-@click.option("--force", is_flag=True)
-def generate_embeddings(
-    experiment_id,
-    gpu_id,
-    batch_size,
-    num_workers,
-    max_wsi_debug,
-    force,
-):
-    """Generate embeddings for an experiment configuration if they do not exist."""
-    config_path = project_dir / f"histolung/experiments/config/{experiment_id}.yaml"
-    config = yaml_load(config_path)
-    generate_embeddings_if_needed(
-        config,
-        max_wsi_debug=max_wsi_debug,
-        force=force,
-        gpu_id=gpu_id,
-        batch_size=batch_size,
-        num_workers=num_workers,
-    )
+              help='Number of workers for dataloaders.')
+def generate_embeddings(experiment_id, force, gpu_id, batch_size, num_workers):
+    """Generate embeddings only."""
+    config = load_and_validate_config(experiment_id)
+    generate_embeddings_task(config,
+                             force,
+                             gpu_id=gpu_id,
+                             batch_size=batch_size,
+                             num_workers=num_workers)
 
 
 @cli.command()
-@click.option('--id',
-              'experiment_id',
-              required=True,
-              help='ID of the experiment to train.')
-def train(experiment_id):
-    """Train a model using the specified experiment configuration."""
-    config_path = project_dir / f'histolung/experiments/config/{experiment_id}.yaml'
-    config = yaml_load(config_path)
-
-    # Check if embeddings exist before training
-    embedding_manager = EmbeddingManager(config)
-    if not embedding_manager.embeddings_exist():
-        click.echo(
-            "Embeddings do not exist. Please generate embeddings first.")
-        return
-
-    # Start MLFlow logging
-    mlflow.set_experiment(config['experiment_name'])
-    mlflow_logger = MLFlowLogger(experiment_name=config['experiment_name'])
-
-    with mlflow.start_run(run_name=experiment_id) as run:
-        mlflow.log_params(config)
-        train_model_if_needed(config, experiment_id, mlflow_logger)
+@click.option('--id', 'experiment_id', required=True, help='Experiment ID.')
+@click.option('--gpu-id', default=0, help='GPU ID for embedding generation.')
+@click.option('--n-folds',
+              default=5,
+              help='The number of fold for the training')
+@click.option('--debug-max-samples',
+              default=None,
+              type=int,
+              help='Maximum number of embedding loaded, for debugging purpose')
+def train(experiment_id, gpu_id, n_folds, debug_max_samples):
+    """Train model only."""
+    config = load_and_validate_config(experiment_id)
+    mlflow_logger = setup_logger(config)
+    train_model(config,
+                gpu_id,
+                mlflow_logger=mlflow_logger,
+                n_folds=n_folds,
+                debug_max_samples=debug_max_samples)
 
 
 @cli.command()
-@click.option('--id',
-              'experiment_id',
-              required=True,
-              help='ID of the experiment to evaluate.')
+@click.option('--id', 'experiment_id', required=True, help='Experiment ID.')
 def evaluate(experiment_id):
-    """Evaluate a model using the specified experiment configuration."""
-    config_path = f'./experiments/config/{experiment_id}.yaml'
-    config = yaml_load(config_path)
+    """Evaluate model only."""
+    config = load_and_validate_config(experiment_id)
     evaluate_model(config, experiment_id)
 
 

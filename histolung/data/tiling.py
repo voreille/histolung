@@ -21,9 +21,9 @@ output_basedir = project_dir / ("data/interim/debug_tiles"
                                 if DEBUG else config["tiles_basedir"])
 output_basedir.mkdir(exist_ok=True)
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
+# Base logger setup
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 def process_wsi(
@@ -106,7 +106,10 @@ def tile_dataset(
 
     if debug_id:
         # Debug a specific WSI
-        mask_path = [m for m in mask_files if debug_id in str(m)][0]
+        try:
+            mask_path = [m for m in mask_files if debug_id in str(m)][0]
+        except:
+            raise ValueError(f"{debug_id} not found in this dataset!!")
         wsi_path = wsi_paths_mapping[debug_id]
         process_wsi(
             wsi_path,

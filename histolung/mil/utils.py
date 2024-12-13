@@ -2,14 +2,17 @@ import logging
 import json
 
 import pandas as pd
+import h5py
 import torch
 import torchvision.transforms as T
 from torch.nn import BCEWithLogitsLoss
 from torch.optim import Adam, SGD, AdamW, RMSprop
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, RandomSampler
 
 from histolung.mil.loss import FocalBCEWithLogitsLoss
-from histolung.mil.data_loader import WSIDataset, EmbeddingDataset
+from histolung.mil.data_loader import (WSIDataset, EmbeddingDataset,
+                                       PreloadedEmbeddingDataset,
+                                       IndexedEmbeddingDataset)
 
 
 def load_metadata(project_dir):
@@ -156,7 +159,47 @@ def get_wsi_dataloaders(wsi_metadata_by_folds, fold, label_map, batch_size=2):
 
 def collate_fn_ragged(batch):
     wsi_ids, embeddings, labels = zip(*batch)
-    return list(wsi_ids), list(embeddings), torch.tensor(labels)
+    return list(wsi_ids), list(embeddings), torch.stack(labels)
+
+
+def get_preloadedembedding_dataloaders(
+    wsi_ids,
+    embeddings,
+    labels_one_hot,
+    indices,
+    batch_size=1,
+    shuffle=True,
+    num_workers=55,
+    prefetch_factor=2,
+    pin_memory=False,
+    resample=None,
+):
+    dataset = IndexedEmbeddingDataset(
+        wsi_ids,
+        embeddings,
+        labels_one_hot,
+        indices=indices,
+    )
+    if resample:
+        num_samples = 1000 * batch_size  # 1000 steps * batch size 512
+        sampler = RandomSampler(dataset,
+                                replacement=True,
+                                num_samples=num_samples)
+        shuffle=False
+    else:
+        sampler = None
+
+
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        collate_fn=collate_fn_ragged,
+        num_workers=num_workers,
+        prefetch_factor=prefetch_factor,
+        pin_memory=pin_memory,
+        sampler=sampler,
+    )
 
 
 def get_embedding_dataloaders(
@@ -166,17 +209,28 @@ def get_embedding_dataloaders(
     batch_size=1,
     preloading=True,
     shuffle=True,
+    label_map=None,
+    num_workers=55,
+    prefetch_factor=2,
+    pin_memory=False,
 ):
+
     dataset = EmbeddingDataset(
         hdf5_filepath,
         wsi_ids,
         labels,
         preloading=preloading,
+        label_map=label_map,
     )
-    return DataLoader(dataset,
-                      batch_size=batch_size,
-                      shuffle=shuffle,
-                      collate_fn=collate_fn_ragged)
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        collate_fn=collate_fn_ragged,
+        num_workers=num_workers,
+        prefetch_factor=prefetch_factor,
+        pin_memory=pin_memory,
+    )
 
 
 def get_preprocessing(data_cfg):
