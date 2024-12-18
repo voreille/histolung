@@ -62,6 +62,9 @@ def get_loss_function(loss_name, **kwargs):
             dtype=torch.float,
         )
 
+    # if kwargs:
+    #     return loss_class(**kwargs)
+    # return loss_class()
     return loss_class(**kwargs)
 
 
@@ -165,7 +168,7 @@ def collate_fn_ragged(batch):
 def get_preloadedembedding_dataloaders(
     wsi_ids,
     embeddings,
-    labels_one_hot,
+    labels_numeric,
     indices,
     batch_size=1,
     shuffle=True,
@@ -177,7 +180,7 @@ def get_preloadedembedding_dataloaders(
     dataset = IndexedEmbeddingDataset(
         wsi_ids,
         embeddings,
-        labels_one_hot,
+        labels_numeric,
         indices=indices,
     )
     if resample:
@@ -185,10 +188,9 @@ def get_preloadedembedding_dataloaders(
         sampler = RandomSampler(dataset,
                                 replacement=True,
                                 num_samples=num_samples)
-        shuffle=False
+        shuffle = False
     else:
         sampler = None
-
 
     return DataLoader(
         dataset,

@@ -219,10 +219,10 @@ class PreloadedEmbeddingDataset(Dataset):
 
 class IndexedEmbeddingDataset(Dataset):
 
-    def __init__(self, wsi_ids, embeddings, labels_one_hot, indices=None):
+    def __init__(self, wsi_ids, embeddings, labels_numeric, indices=None):
         self.wsi_ids = wsi_ids
         self.embeddings = embeddings
-        self.labels_one_hot = labels_one_hot
+        self.labels_numeric = labels_numeric
         if indices is not None:
             self.indices = indices
         else:
@@ -236,5 +236,5 @@ class IndexedEmbeddingDataset(Dataset):
         return (
             self.wsi_ids[real_idx],
             self.embeddings[real_idx],
-            self.labels_one_hot[real_idx],
+            self.labels_numeric[real_idx],
         )

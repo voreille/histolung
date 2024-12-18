@@ -7,6 +7,7 @@ from torch import nn
 from torch.optim import Adam, SGD, AdamW, RMSprop
 import torch.nn.functional as F
 from torchmetrics.classification import Accuracy
+import torch.nn.functional as F
 
 from histolung.mil.utils import get_optimizer, get_scheduler, get_loss_function
 
@@ -128,7 +129,10 @@ class AttentionAggregatorPL(AggregatorPL):
             nn.Softmax(dim=0),
         )
         self.fc = nn.Linear(hidden_dim, num_classes)
-        self.loss_fn = get_loss_function(loss, **loss_kwargs)
+        if loss_kwargs:
+            self.loss_fn = get_loss_function(loss, **loss_kwargs)
+        else:
+            self.loss_fn = get_loss_function(loss)
 
         # Metrics:
         self.train_accuracy = Accuracy(
@@ -143,44 +147,49 @@ class AttentionAggregatorPL(AggregatorPL):
         )
 
     def forward(self, x):
-        x = self.projection_layer(x)
-        attention = self.attention(x)
-        attention = torch.transpose(attention, 1, 0)
-        aggregated_embedding = torch.mm(attention, x)
+        x = self.projection_layer(x) # (num_patches, hidden_dim)
+        attention = self.attention(x) # (num_patches, num_classes)
+        attention = torch.transpose(attention, 1, 0) # (num_classes, num_patches)
+        aggregated_embedding = torch.mm(attention, x) # (num_classes, hidden_dim)
         aggregated_embedding = aggregated_embedding.view(
             -1,
             self.hidden_dim * self.num_classes,
-        )
-        output = self.pre_fc_layer(aggregated_embedding)
-        output = self.fc(output)
+        ) # (num_patches, hidden_dim)
+        output = self.pre_fc_layer(aggregated_embedding) # (1, hidden_dim)
+        output = self.fc(output) # (1, num_classes)
         return torch.squeeze(output), attention
 
     def training_step(self, batch, batch_idx):
         _, embeddings, labels = batch
         # labels = labels.to(self.device)
         batch_outputs = []
+        batch_size = len(labels)
 
         for embedding in embeddings:
             outputs, _ = self(embedding)
             batch_outputs.append(outputs)
 
         batch_outputs = torch.stack(batch_outputs)
-        loss = self.loss_fn(batch_outputs, labels.float())
+        labels_one_hot = F.one_hot(labels,
+                                   num_classes=self.num_classes).float()
+        loss = self.loss_fn(batch_outputs, labels_one_hot)
 
         # Compute accuracy
-        # preds = torch.argmax(batch_outputs, dim=-1)
-        self.train_accuracy(batch_outputs, labels)
+        preds = torch.argmax(batch_outputs, dim=-1)
+        self.train_accuracy(preds, labels)
 
         # Log metrics
         self.log('train_loss',
                  loss,
                  on_step=True,
                  on_epoch=True,
+                 batch_size=batch_size,
                  prog_bar=True)
         self.log('train_acc',
                  self.train_accuracy,
                  on_step=True,
                  on_epoch=True,
+                 batch_size=batch_size,
                  prog_bar=True)
         return loss
 
@@ -188,16 +197,19 @@ class AttentionAggregatorPL(AggregatorPL):
         _, embeddings, labels = batch
         # labels = labels.to(self.device)
         batch_outputs = []
+        batch_size = len(labels)
 
         for embedding in embeddings:
             output, _ = self(embedding)
             batch_outputs.append(output)
 
         batch_outputs = torch.stack(batch_outputs)
-        loss = self.loss_fn(batch_outputs, labels.float())
+        labels_one_hot = F.one_hot(labels,
+                                   num_classes=self.num_classes).float()
+        loss = self.loss_fn(batch_outputs, labels_one_hot)
 
         # Compute accuracy
-        # preds = torch.argmax(batch_outputs, dim=-1)
+        preds = torch.argmax(batch_outputs, dim=-1)
         self.val_accuracy(batch_outputs, labels)
 
         # Log metrics
@@ -206,6 +218,7 @@ class AttentionAggregatorPL(AggregatorPL):
                  self.val_accuracy,
                  on_step=False,
                  on_epoch=True,
+                 batch_size=batch_size,
                  prog_bar=True)
 
     def test_step(self, batch, batch_idx):

@@ -87,7 +87,7 @@ def load_data_as_list(hdf5_path, label_map, debug_max_samples=None):
     wsi_ids = []
     labels = []
     embeddings = []
-    labels_one_hot_list = []
+    labels_numeric = []
 
     # Open the HDF5 file and preload embeddings and labels
     with h5py.File(hdf5_path, "r") as hdf5_file:
@@ -103,15 +103,13 @@ def load_data_as_list(hdf5_path, label_map, debug_max_samples=None):
                 labels.append(label)
                 embeddings.append(
                     torch.tensor(hdf5_file["embeddings"][wsi_id][:]))
-                labels_one_hot_list.append(
-                    F.one_hot(torch.tensor(label_map[label]),
-                              num_classes=num_classes))
+                labels_numeric.append(torch.tensor(label_map[label]))
 
                 # Stop if debug_max_samples is reached
                 if debug_max_samples and len(wsi_ids) >= debug_max_samples:
                     break
 
-    return wsi_ids, embeddings, labels, labels_one_hot_list
+    return wsi_ids, embeddings, labels, labels_numeric
 
 
 def generate_embeddings_task(config, force=False, **kwargs):
@@ -134,7 +132,7 @@ def train_model(config,
     click.echo("Training model...")
     embedding_manager = EmbeddingManager(config)
     hdf5_path = embedding_manager.get_embedding_path()
-    wsi_ids, embeddings, labels, labels_one_hot = load_data_as_list(
+    wsi_ids, embeddings, labels, labels_numeric = load_data_as_list(
         hdf5_path,
         label_map=config["data"]["label_map"],
         debug_max_samples=debug_max_samples,
@@ -149,19 +147,19 @@ def train_model(config,
         wsi_dataloader_train = get_preloadedembedding_dataloaders(
             wsi_ids,
             embeddings,
-            labels_one_hot,
+            labels_numeric,
             train_index,
             batch_size=config["training"]["batch_size"],
             shuffle=True,
             num_workers=0,
             prefetch_factor=None,
             pin_memory=True,
-            resample=1000,
+            # resample=1000,
         )
         wsi_dataloader_val = get_preloadedembedding_dataloaders(
             wsi_ids,
             embeddings,
-            labels_one_hot,
+            labels_numeric,
             val_index,
             batch_size=config["training"]["batch_size"],
             shuffle=False,

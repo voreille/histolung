@@ -12,7 +12,7 @@ aggregator:
     input_dim: 1024 # Could be inferred from the feature extractor, but fuck
     hidden_dim: 128 # Dimension of the projection in the aggregator
     num_classes: 2 # Number of output classes (binary classification)
-    dropout: 0.2
+    dropout: 0.5
 
 # Training configuration section
 training:
@@ -32,10 +32,10 @@ training:
   device: cuda # Device to use for training (cpu or cuda)
   loss: BCEWithLogitsLoss
   loss_kwargs:
-    weight:
-      - 0.824
+    # weight:
+      # - 0.824
       # - 0.47
-      - 0.809
+      # - 0.809
       # - 0.742
   early_stop_patience: 15
   lr_scheduler: CosineAnnealingLR
