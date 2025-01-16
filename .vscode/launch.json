@@ -9,7 +9,7 @@
             "args": [
                 "run-histoqc-task",
                 "--dataset",
-                "tcga_luad",
+                "cptac_lusc",
                 "--num_workers",
                 "12",
             ],
@@ -43,7 +43,7 @@
                 "--num_workers",
                 "12",
                 "--debug_id",
-                "TCGA-66-2794-01Z-00-DX1",
+                "TCGA-21-1080-01Z-00-DX1",
             ],
             "console": "integratedTerminal"
         },

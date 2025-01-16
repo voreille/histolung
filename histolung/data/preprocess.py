@@ -4,6 +4,9 @@ from pathlib import Path
 import json
 from datetime import datetime
 
+import pandas as pd
+import yaml
+
 from histolung.utils.yaml import load_yaml_with_env
 from histolung.data.histoqc import run_histoqc
 from histolung.data.rename import rename_masks_with_copy, write_wsi_paths_to_csv
@@ -71,6 +74,54 @@ def cli():
     pass
 
 
+def parse_histoqc_config_mapping(filepath, input_dir):
+    """
+    Parse the HistoQC config mapping YAML file and resolve wsi_ids to file paths in the input directory,
+    filtering only valid WSI files (e.g., .svs, .tiff).
+
+    Args:
+        filepath (str): Path to the YAML file containing mappings.
+        input_dir (Path): Path to the directory containing the input WSIs.
+
+    Returns:
+        list[dict]: List of dictionaries, each containing 'config' and 'wsi_paths'.
+    """
+    valid_extensions = {
+        ".svs", ".tif", ".tiff", ".ndpi", ".vms", ".vmu", ".scn", ".mrxs",
+        ".bif", ".svslide"
+    }
+
+    with open(filepath, 'r') as f:
+        config_mapping = yaml.safe_load(f)
+
+    mappings = config_mapping["mappings"]
+    resolved_mappings = []
+
+    for mapping in mappings:
+        config_path = Path(mapping["config"])
+        wsi_ids = mapping["wsi_ids"]
+
+        # Search for matching WSI files in the input directory
+        wsi_paths = []
+        for wsi_id in wsi_ids:
+            matching_files = [
+                file for file in input_dir.rglob(f"*{wsi_id}*")
+                if file.suffix.lower() in valid_extensions
+            ]
+            if not matching_files:
+                logger.warning(
+                    f"No valid WSI files found for WSI ID: {wsi_id}")
+            else:
+                wsi_paths.extend(matching_files)
+
+        resolved_mappings.append({
+            "config": config_path,
+            "wsi_paths": wsi_paths,
+        })
+
+    return resolved_mappings
+
+
 @cli.command()
 @click.option("--dataset",
               required=True,
@@ -80,28 +131,55 @@ def cli():
               show_default=True,
               help="Number of workers for parallel processing")
 def run_histoqc_task(dataset, num_workers):
-    """Run HistoQC on the specified dataset"""
+    """Run HistoQC on the specified dataset."""
     configure_task_logger("histoqc", dataset)
     dataset_config = config["datasets"].get(dataset)
-    logger.info(f"Using data_config: {dataset_config}")
+    logger.info(f"Using dataset_config: {dataset_config}")
 
     if not dataset_config:
         raise click.BadParameter(
             f"Dataset '{dataset}' not found in configuration.")
 
     input_dir = Path(dataset_config["data_dir"])
-    masks_dir = masks_basedir / dataset
+    masks_dir = project_dir / "data/interim/masks" / dataset
     masks_dir.mkdir(parents=True, exist_ok=True)
 
+    histoqc_config_mapping = dataset_config.get("histoqc_config_mapping")
+
+    # Case 1: Default config for all files
+    if histoqc_config_mapping is None:
+        file_list = list(input_dir.glob(dataset_config["input_pattern"]))
+        config_path = project_dir / dataset_config[
+            "default_histoqc_config_path"]
+        config_list = [config_path] * len(file_list)
+    else:
+        # Case 2 & 3: Resolve mappings from YAML
+        histoqc_config_mapping = parse_histoqc_config_mapping(
+            histoqc_config_mapping, input_dir)
+
+        # Flatten file and config lists
+        file_list = []
+        config_list = []
+        for mapping in histoqc_config_mapping:
+            file_list.extend(mapping["wsi_paths"])
+            config_list.extend([project_dir / mapping["config"]] *
+                               len(mapping["wsi_paths"]))
+
+    # Log the files and configs being processed
+    logger.info(f"Files to process: {file_list}")
+    logger.info(f"Configurations: {config_list}")
+
+    # Run HistoQC
     logger.info(f"Running HistoQC for dataset: {dataset}")
-    run_histoqc(input_dir,
-                masks_dir,
-                input_pattern=dataset_config["input_pattern"],
-                user=None,
-                config_path=project_dir /
-                dataset_config["histoqc_config_path"],
-                force=False,
-                num_workers=num_workers)
+    run_histoqc(
+        file_list,
+        config_list,
+        input_dir,
+        masks_dir,
+        user=None,
+        force=False,
+        num_workers=num_workers,
+    )
     logger.info("HistoQC completed.")
 
 
@@ -124,11 +202,12 @@ def rename_masks_task(dataset):
 
     logger.info(f"Writing raw WSI path to CSV")
     write_wsi_paths_to_csv(
-        masks_dir / "results.tsv",
-        masks_dir / "raw_wsi_path.csv",
-        dataset,
-        dataset_config,
+        raw_data_dir=Path(dataset_config["data_dir"]).resolve(),
+        masks_dir=masks_dir,
+        output_csv=masks_dir / "raw_wsi_path.csv",
+        dataset=dataset,
     )
+
     logger.info(f"Writing raw WSI path to CSV completed")
 
 

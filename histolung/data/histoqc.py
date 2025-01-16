@@ -3,6 +3,8 @@ import re
 import subprocess
 from pathlib import Path
 import logging
+from collections import defaultdict
+import shutil
 
 from histolung.utils.yaml import load_yaml_with_env
 
@@ -134,18 +136,32 @@ def compute_usable_mask_old(
         raise
 
 
-def run_histoqc(input_dir,
+def run_histoqc(file_list,
+                config_list,
+                input_dir,
                 output_dir,
-                input_pattern="*.svs",
                 docker_image='histotools/histoqc:master',
                 user=None,
-                config_path=None,
                 force=False,
                 num_workers=None):
     """
-    Tile a single image using HistoQC Docker, capturing and logging Docker stdout and stderr.
+    Process a given list of files with corresponding configuration files using HistoQC.
+    
+    Args:
+        file_list (list[str]): List of files to process.
+        config_list (list[str]): List of config files corresponding to the files.
+        input_dir (Path): Path to the input directory containing the files.
+        output_dir (Path): Path to the output directory.
+        docker_image (str): Docker image for HistoQC.
+        user (str): User identifier for the Docker container.
+        force (bool): Force processing even if outputs already exist.
+        num_workers (int): Number of workers for parallel processing.
     """
-    # Ensure Docker image is present (check only once)
+    if len(file_list) != len(config_list):
+        raise ValueError(
+            "The number of files must match the number of config files.")
+
+    # Ensure Docker image is present
     check_and_pull_docker_image(docker_image)
 
     # Default user if not specified
@@ -156,42 +172,79 @@ def run_histoqc(input_dir,
 
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
+    histoqc_output_dir = output_dir / "output"
 
-    # Ensure the config path is provided
-    if config_path is not None:
-        config_path = Path(config_path)
-    else:
-        raise ValueError("Config path must be provided for HistoQC.")
-
-    histoqc_command = f"histoqc_pipeline /data_ro/{input_pattern} -o /data/output -c {config_path}"
-    if force:
-        histoqc_command += " --force"
-
-    if num_workers:
-        histoqc_command += f" --n {num_workers}"
-
-    command = [
-        "docker", "run", "--rm", "-v", f"{input_dir}:/data_ro:ro", "-v",
-        f"{output_dir}:/data", "-v",
-        f"{config_path.parent}:{config_path.parent}", "--name",
-        f"histoqc_{input_dir.name}", "-u", user, docker_image, "/bin/bash",
-        "-c", histoqc_command
+    # Translate file paths to container paths
+    container_input_dir = "/data_ro"
+    container_file_list = [
+        f"{container_input_dir}/{Path(file).relative_to(input_dir)}"
+        for file in file_list
     ]
 
-    try:
-        # Capture stdout and stderr from the Docker process
-        result = subprocess.run(command, check=True)
+    # Group container file paths by configuration
+    config_to_files = defaultdict(list)
+    for container_file, config in zip(container_file_list, config_list):
+        config_to_files[config].append(container_file)
 
-        # Log the Docker stdout and stderr
-        context = f"HistoQC output for '{input_dir.name}'"
-        parse_and_log_output(result.stdout, logger, context)
-        parse_and_log_output(result.stderr, logger, context)
+    # List to store paths of renamed error logs
+    error_logs = []
 
-        logger.info(f"Mask computed for image {input_dir.name}.")
+    # Process each config group
+    for idx, (config_file,
+              container_files) in enumerate(config_to_files.items()):
+        histoqc_command = (f"histoqc_pipeline {' '.join(container_files)} "
+                           f"-o /data/output -c {config_file}")
+        if force:
+            histoqc_command += " --force"
 
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Error during mask computing for {input_dir.name}: {e}")
-        raise
+        if num_workers:
+            histoqc_command += f" --n {num_workers}"
+
+        command = [
+            "docker", "run", "--rm", "-v",
+            f"{input_dir}:{container_input_dir}:ro", "-v",
+            f"{output_dir}:/data", "-v",
+            f"{Path(config_file).parent}:{Path(config_file).parent}", "--name",
+            f"histoqc_{Path(config_file).stem}_{idx}", "-u", user,
+            docker_image, "/bin/bash", "-c", histoqc_command
+        ]
+
+        try:
+            # Run Docker process
+            result = subprocess.run(command, check=True)
+
+            # Rename error.log to a unique name
+            error_log_path = histoqc_output_dir / "error.log"
+            if error_log_path.exists():
+                unique_error_log_path = histoqc_output_dir / f"error_{idx}.log"
+                shutil.move(error_log_path, unique_error_log_path)
+                error_logs.append(unique_error_log_path)
+
+            # Log results
+            context = f"HistoQC output for config '{config_file}'"
+            parse_and_log_output(result.stdout, logger, context)
+            parse_and_log_output(result.stderr, logger, context)
+
+            logger.info(f"Mask computed for files using config {config_file}.")
+
+        except subprocess.CalledProcessError as e:
+            logger.error(
+                f"Error during mask computing for config {config_file}: {e}")
+            raise
+
+    # Concatenate all error logs into a single error.log
+    if error_logs:
+        final_error_log = histoqc_output_dir / "error.log"
+        with open(final_error_log, "w") as outfile:
+            for log in error_logs:
+                with open(log, "r") as infile:
+                    shutil.copyfileobj(infile, outfile)
+        logger.info(f"Combined error log written to {final_error_log}.")
+
+        # Delete the unique error log files
+        for log in error_logs:
+            log.unlink()
+        logger.info("Unique error logs deleted after concatenation.")
 
 
 def run_histoqc_raw_path_mounted(input_dir,

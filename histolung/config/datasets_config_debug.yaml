@@ -11,17 +11,16 @@ datasets:
     histoqc_config_mapping: "data/interim/histoqc_config_mapping/tcga_lusc_complete.yaml"
     magnification: 10
     label: "LUSC"
-  cptac_lusc:
+  cptac_lscc:
     data_dir: "${CPTAC_DATA_RAW_PATH}/CPTAC-LSCC_v10/LSCC"
     input_pattern: "*.svs"
     default_histoqc_config_path: "histolung/config/HistoQC/config_light.ini"
-    histoqc_config_mapping: "data/interim/histoqc_config_mapping/cptac_lusc_complete.yaml"
     magnification: 10
     label: "LUSC"
   cptac_luad:
     data_dir: "${CPTAC_DATA_RAW_PATH}/CPTAC-LUAD_v12/LUAD"
     input_pattern: "*.svs"
-    histoqc_config_mapping: "data/interim/histoqc_config_mapping/cptac_luad_complete.yaml"
+    histoqc_config_mapping: "data/interim/wsi_to_config_map/cptac_luad_mapping.csv"
     default_histoqc_config_path: "histolung/config/HistoQC/config_light.ini"
     magnification: 10
     label: "LUAD"
