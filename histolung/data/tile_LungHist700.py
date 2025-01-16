@@ -1,7 +1,9 @@
 from pathlib import Path
-from PIL import Image, ImageDraw
+import re
 import os
+from PIL import Image, ImageDraw
 from dotenv import load_dotenv
+import numpy as np
 
 load_dotenv()
 
@@ -13,33 +15,113 @@ outline_folder = output_folder / "outline"
 output_folder.mkdir(parents=True, exist_ok=True)
 outline_folder.mkdir(parents=True, exist_ok=True)
 
-# Define the tile size and stride
+# Define tile size and desired magnification
 tile_size = 224
-tile_stride = 112  # Overlap of 50%
+desired_magnification = 10
+
+# Define border styles
+border_styles = [
+    {"color": "red", "width": 2, "style": "solid"},  # Solid red
+    {"color": "blue", "width": 2, "style": "dotted"},  # Dotted blue
+    {"color": "green", "width": 3, "style": "dashed"},  # Dashed green
+    {"color": "yellow", "width": 2, "style": "solid"},  # Solid yellow
+    {"color": "purple", "width": 3, "style": "dotted"},  # Dotted purple
+]
+
+
+def extract_magnification(filename):
+    """Extract magnification from filename."""
+    match = re.search(r"_([24]0)x_", filename)
+    if match:
+        return float(match.group(1))
+    else:
+        raise ValueError(f"Magnification not found in filename: {filename}")
+
+
+def calculate_stride(image_dim, tile_size):
+    """Calculate stride to align tiles symmetrically with borders."""
+    if image_dim <= tile_size:
+        raise ValueError("Image dimension must be larger than tile size")
+
+    n_tiles = np.ceil(image_dim / tile_size)
+    if n_tiles == 1:
+        return 0  # Single tile, no stride needed
+    total_stride_space = image_dim - tile_size * n_tiles
+    stride = tile_size + total_stride_space // (n_tiles - 1)
+    return int(stride)
+
+
+def draw_styled_border(draw, left, top, right, bottom, style):
+    """Draw styled borders (solid, dotted, dashed) on the image."""
+    color = style["color"]
+    width = style["width"]
+    border_style = style["style"]
+
+    if border_style == "solid":
+        for w in range(width):
+            draw.rectangle([left + w, top + w, right - w, bottom - w], outline=color)
+
+    elif border_style == "dotted":
+        step = 5  # Distance between dots
+        for w in range(width):
+            # Top border
+            for x in range(left + w, right - w, step):
+                draw.point((x, top + w), fill=color)
+            # Bottom border
+            for x in range(left + w, right - w, step):
+                draw.point((x, bottom - w), fill=color)
+            # Left border
+            for y in range(top + w, bottom - w, step):
+                draw.point((left + w, y), fill=color)
+            # Right border
+            for y in range(top + w, bottom - w, step):
+                draw.point((right - w, y), fill=color)
+
+    elif border_style == "dashed":
+        dash_length = 10  # Length of dashes
+        space_length = 5  # Space between dashes
+        for w in range(width):
+            # Top border
+            for x in range(left + w, right - w, dash_length + space_length):
+                draw.line([x, top + w, x + dash_length, top + w], fill=color, width=1)
+            # Bottom border
+            for x in range(left + w, right - w, dash_length + space_length):
+                draw.line([x, bottom - w, x + dash_length, bottom - w], fill=color, width=1)
+            # Left border
+            for y in range(top + w, bottom - w, dash_length + space_length):
+                draw.line([left + w, y, left + w, y + dash_length], fill=color, width=1)
+            # Right border
+            for y in range(top + w, bottom - w, dash_length + space_length):
+                draw.line([right - w, y, right - w, y + dash_length], fill=color, width=1)
+
 
 # Iterate through all .jpg files in the input folder
 for file in input_folder.rglob("*.jpg"):
     filename = file.stem
+    magnification = extract_magnification(filename)
+    resampling_factor = desired_magnification / magnification
 
     with Image.open(file) as img:
-        # Resize the image to the nearest multiple of the tile size
-        new_width = ((img.width // tile_stride) + 1) * tile_stride
-        new_height = ((img.height // tile_stride) + 1) * tile_stride
+        # Resize the image based on desired magnification
+        new_height = int(img.height * resampling_factor)
+        new_width = int(img.width * resampling_factor)
         img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
 
-        # Create a copy of the image for drawing tile outlines
-        outlined_image = img.copy()
-        draw = ImageDraw.Draw(outlined_image)
+        # Calculate strides for symmetrical tiling
+        stride_x = calculate_stride(new_width, tile_size)
+        stride_y = calculate_stride(new_height, tile_size)
+
+        # Create a copy of the image for drawing tile overlays
+        outlined_image = img.convert("RGBA")  # Add alpha channel
+        overlay = Image.new("RGBA", outlined_image.size, (255, 255, 255, 0))  # Transparent overlay
+        draw = ImageDraw.Draw(overlay)
 
         # Generate tiles
-        num_tiles_x = (img.width - tile_size) // tile_stride + 1
-        num_tiles_y = (img.height - tile_size) // tile_stride + 1
+        x_positions = list(range(0, new_width - tile_size + 1, stride_x))
+        y_positions = list(range(0, new_height - tile_size + 1, stride_y))
 
-        for i in range(num_tiles_x):
-            for j in range(num_tiles_y):
-                # Compute tile coordinates
-                left = i * tile_stride
-                top = j * tile_stride
+        for i, left in enumerate(x_positions):
+            for j, top in enumerate(y_positions):
                 right = left + tile_size
                 bottom = top + tile_size
 
@@ -55,12 +137,18 @@ for file in input_folder.rglob("*.jpg"):
                 tile_output_path = output_folder / f"{filename}_{tile_id}.jpg"
                 tile.save(tile_output_path, "JPEG")
 
-                # Draw the outline on the copy
-                draw.rectangle([left, top, right, bottom],
-                               outline="red",
-                               width=2)
+                # Choose border style based on row/column
+                style_index = (i + j) % len(border_styles)
+                style = border_styles[style_index]
+
+                # Draw styled border
+                draw_styled_border(draw, left, top, right, bottom, style)
+
+        # Merge the overlay with the original image
+        outlined_image = Image.alpha_composite(outlined_image, overlay)
 
         # Save the outlined image
+        outlined_image = outlined_image.convert("RGB")  # Convert back to RGB for saving
         outlined_image_path = outline_folder / f"{filename}_outlined.jpg"
         outlined_image.save(outlined_image_path, "JPEG")
 
