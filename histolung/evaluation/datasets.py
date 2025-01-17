@@ -31,6 +31,7 @@ class BaseDatasetManager:
         self.transform = transform
         self.n_splits = n_splits
         self.validate_metadata()
+        self.tile_paths = metadata_df['tile_path'].values.tolist()
 
     def validate_metadata(self):
         """Ensure metadata contains required columns."""
@@ -63,42 +64,34 @@ class BaseDatasetManager:
 
         for train_idx, val_idx in splitter.split(self.metadata_df, stratify,
                                                  groups):
-            train_dataset = TileDataset(
-                self.metadata_df.iloc[train_idx]['tile_path'].values,
-                self.metadata_df.iloc[train_idx][stratify_column].values,
-                transform=self.transform,
-            )
-            val_dataset = TileDataset(
-                self.metadata_df.iloc[val_idx]['tile_path'].values,
-                self.metadata_df.iloc[val_idx][stratify_column].values,
-                transform=self.transform,
-            )
-            folds.append((train_dataset, val_dataset))
+            train_dataset = self.metadata_df.iloc[train_idx][
+                'tile_id'].values.tolist()
+            test_dataset = self.metadata_df.iloc[test_idx][
+                'tile_id'].values.tolist()
+            folds.append((train_dataset, test_dataset))
 
         return folds
 
-
-class TileDataset(Dataset):
-
-    def __init__(self, tile_paths, transform=None):
+    def get_splitter(self, stratify_column='label', group_column=None):
         """
-        Dataset for histopathology tiles.
+        Split the dataset into k folds and return train/validation datasets for each fold.
         Args:
-            tile_paths: List or array of paths to tile images.
-            labels: List or array of labels corresponding to the tiles.
-            transform: Transformations to apply to the images.
+            stratify_column: Column name to stratify by (e.g., 'label').
+            group_column: Column name for grouping (e.g., 'patient_id'). If None, no grouping is applied.
+        Returns:
+            List of (train_dataset, validation_dataset) tuples.
         """
-        self.tile_paths = tile_paths
-        self.transform = transform
+        splitter = (StratifiedGroupKFold(
+            n_splits=self.n_splits, shuffle=True, random_state=42)
+                    if group_column else StratifiedKFold(
+                        n_splits=self.n_splits, shuffle=True, random_state=42))
 
-    def __len__(self):
-        return len(self.tile_paths)
+        folds = []
+        stratify = self.metadata_df[
+            stratify_column] if stratify_column else None
+        groups = self.metadata_df[group_column] if group_column else None
 
-    def __getitem__(self, idx):
-        image = pyspng.load(self.tile_paths[idx])  # Efficient PNG loading
-        if self.transform:
-            image = self.transform(image)
-        return image, self.tile_paths[idx].stem
+        return splitter.split(self.metadata_df, stratify, groups)
 
 
 class LungHist700DatasetManager(BaseDatasetManager):
@@ -124,3 +117,42 @@ class WSSS4LUADDatasetManager(BaseDatasetManager):
         super().validate_metadata()
         if 'mask_path' not in self.metadata_df.columns:
             raise ValueError("Metadata is missing the 'mask_path' column.")
+
+
+class TileDataset(Dataset):
+
+    def __init__(self, tile_paths, transform=None):
+        """
+        Dataset for histopathology tiles.
+        Args:
+            tile_paths: List or array of paths to tile images.
+            labels: List or array of labels corresponding to the tiles.
+            transform: Transformations to apply to the images.
+        """
+        self.tile_paths = tile_paths
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.tile_paths)
+
+    def __getitem__(self, idx):
+        image = pyspng.load(self.tile_paths[idx])  # Efficient PNG loading
+        if self.transform:
+            image = self.transform(image)
+        return image, self.tile_paths[idx].stem
+
+
+class EmbeddingDataset(Dataset):
+
+    def __init__(self, embeddings, labels, transform=None):
+        self.tile_paths = tile_paths
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.tile_paths)
+
+    def __getitem__(self, idx):
+        image = pyspng.load(self.tile_paths[idx])  # Efficient PNG loading
+        if self.transform:
+            image = self.transform(image)
+        return image, self.tile_paths[idx].stem

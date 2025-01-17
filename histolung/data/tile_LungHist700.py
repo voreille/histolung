@@ -241,6 +241,7 @@ for tile_path in tiles_path:
     if not matching_row.empty:
         row = matching_row.iloc[0]
         rows.append({
+            'tile_id': tile_path.stem,
             'patient_id': row['patient_id'],
             'superclass': row['superclass'],
             'subclass': row['subclass'],
