@@ -1,4 +1,7 @@
+from pathlib import Path
+
 from torch.utils.data import Dataset
+import torch
 from sklearn.model_selection import StratifiedGroupKFold, StratifiedKFold
 import pyspng
 
@@ -66,7 +69,7 @@ class BaseDatasetManager:
                                                  groups):
             train_dataset = self.metadata_df.iloc[train_idx][
                 'tile_id'].values.tolist()
-            test_dataset = self.metadata_df.iloc[test_idx][
+            test_dataset = self.metadata_df.iloc[val_idx][
                 'tile_id'].values.tolist()
             folds.append((train_dataset, test_dataset))
 
@@ -99,6 +102,9 @@ class LungHist700DatasetManager(BaseDatasetManager):
     def get_folds(self):
         return super().get_folds(group_column='patient_id')
 
+    def get_folds(self):
+        return super().get_splitter(group_column='patient_id')
+
 
 class LC25000DatasetManager(BaseDatasetManager):
 
@@ -121,7 +127,7 @@ class WSSS4LUADDatasetManager(BaseDatasetManager):
 
 class TileDataset(Dataset):
 
-    def __init__(self, tile_paths, transform=None):
+    def __init__(self, tile_paths, preprocess=None, transform=None):
         """
         Dataset for histopathology tiles.
         Args:
@@ -129,16 +135,24 @@ class TileDataset(Dataset):
             labels: List or array of labels corresponding to the tiles.
             transform: Transformations to apply to the images.
         """
+
         self.tile_paths = tile_paths
+        self.preprocess = preprocess
         self.transform = transform
 
     def __len__(self):
         return len(self.tile_paths)
 
     def __getitem__(self, idx):
-        image = pyspng.load(self.tile_paths[idx])  # Efficient PNG loading
+        tile_path = self.tile_paths[idx]
+        with open(tile_path, 'rb') as f:
+            image = pyspng.load(f.read())
+
         if self.transform:
             image = self.transform(image)
+
+        if self.preprocess:
+            image = self.preprocess(image).type(torch.FloatTensor)
         return image, self.tile_paths[idx].stem
 
 

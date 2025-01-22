@@ -35,7 +35,7 @@ def process_wsi(
     tile_size=224,
     threshold=0.8,
     num_workers_tiles=12,
-    save_mask=False,
+    save_masks=False,
     save_tile_overlay=False,
     save_metadata=True,
 ):
@@ -48,7 +48,7 @@ def process_wsi(
             magnification=magnification,
             tile_size=tile_size,
             threshold=threshold,
-            save_mask=save_mask,
+            save_masks=save_masks,
             save_tile_overlay=save_tile_overlay,
         )
 
@@ -88,6 +88,7 @@ def tile_dataset(
     num_workers_wsi=4,
     num_workers_tiles=12,
     save_tile_overlay=False,
+    save_masks=False,
     magnification=10,
     debug_id=None,
 ):
@@ -115,6 +116,7 @@ def tile_dataset(
             tile_size=tile_size,
             threshold=threshold,
             num_workers_tiles=num_workers_tiles,
+            save_masks=save_masks,
             save_tile_overlay=save_tile_overlay,
         )
         return
@@ -129,7 +131,7 @@ def tile_dataset(
             tile_size,
             threshold,
             num_workers_tiles,
-            False,  # save_mask
+            save_masks,  # save_mask
             save_tile_overlay,
         ) for mask_path in mask_files
     ]

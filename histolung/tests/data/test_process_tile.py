@@ -52,7 +52,7 @@ class TestTileProcessor(unittest.TestCase):
                 magnification=self.magnification,
                 tile_size=self.tile_size,
                 threshold=self.threshold,
-                save_mask=self.save_mask,
+                save_masks=self.save_mask,
                 save_tile_overlay=self.save_tile_overlay)
 
     def test_initialization(self):

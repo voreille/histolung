@@ -16,11 +16,19 @@ logger = logging.getLogger(__name__)
 
 # Base directory and configuration loading
 project_dir = Path(__file__).parents[2].resolve()
-config_path = project_dir / "histolung/config/datasets_config.yaml"
-config = load_yaml_with_env(config_path)
 
-masks_basedir = project_dir / config["histoqc_masks_basedir"]
-tiles_basedir = project_dir / config["tiles_basedir"]
+
+def load_stuff(config=None):
+    if config is None:
+        config = load_yaml_with_env(project_dir /
+                                    "histolung/config/datasets_config.yaml")
+
+    if Path(config) == Path or type(config) == str:
+        config = load_yaml_with_env(config)
+
+    masks_basedir = project_dir / config["histoqc_masks_basedir"]
+    tiles_basedir = project_dir / config["tiles_basedir"]
+    return config, masks_basedir, tiles_basedir
 
 
 def configure_task_logger(task_name, dataset=None, debug_id=None):
@@ -130,8 +138,14 @@ def parse_histoqc_config_mapping(filepath, input_dir):
               default=1,
               show_default=True,
               help="Number of workers for parallel processing")
-def run_histoqc_task(dataset, num_workers):
+@click.option("-c",
+              "--config",
+              type=click.Path(exists=True),
+              help="Path to the configuration file",
+              default=None)
+def run_histoqc_task(dataset, num_workers, config):
     """Run HistoQC on the specified dataset."""
+    config, masks_basedir, _ = load_stuff(config)
     configure_task_logger("histoqc", dataset)
     dataset_config = config["datasets"].get(dataset)
     logger.info(f"Using dataset_config: {dataset_config}")
@@ -141,7 +155,7 @@ def run_histoqc_task(dataset, num_workers):
             f"Dataset '{dataset}' not found in configuration.")
 
     input_dir = Path(dataset_config["data_dir"])
-    masks_dir = project_dir / "data/interim/masks" / dataset
+    masks_dir = masks_basedir / dataset
     masks_dir.mkdir(parents=True, exist_ok=True)
 
     histoqc_config_mapping = dataset_config.get("histoqc_config_mapping")
@@ -187,9 +201,15 @@ def run_histoqc_task(dataset, num_workers):
 @click.option("--dataset",
               required=True,
               help="Dataset name (e.g., 'tcga_luad')")
-def rename_masks_task(dataset):
+@click.option("-c",
+              "--config",
+              type=click.Path(exists=True),
+              help="Path to the configuration file",
+              default=None)
+def rename_masks_task(dataset, config):
     """Rename mask folders according to dataset conventions"""
     configure_task_logger("rename_masks_task", dataset)
+    config, masks_basedir, _ = load_stuff(config)
     dataset_config = config["datasets"].get(dataset)
     if not dataset_config:
         raise click.BadParameter(
@@ -212,8 +232,14 @@ def rename_masks_task(dataset):
 
 
 @cli.command()
-def write_tiles_metadata():
+@click.option("-c",
+              "--config",
+              type=click.Path(exists=True),
+              help="Path to the configuration file",
+              default=None)
+def write_tiles_metadata(config):
     """Store metatdata about tiles path, label for the dataloader"""
+    config, _, tiles_basedir = load_stuff(config)
     tiles_basedir = Path(config["tiles_basedir"])
     preprocessed_datasets = [
         f.name for f in tiles_basedir.iterdir() if f.is_dir()
@@ -247,33 +273,71 @@ def write_tiles_metadata():
 
 
 @cli.command()
-@click.option("--dataset",
-              required=True,
-              help="Dataset name (e.g., 'tcga_luad')")
-@click.option("--tile_size",
-              default=224,
-              help="Tile size for tiling the WSI images")
-@click.option("--threshold",
-              default=0.8,
-              help="Threshold for tile inclusion based on mask coverage")
-@click.option("--num_workers",
-              default=1,
-              show_default=True,
-              help="Number of workers for parallel processing")
+@click.option(
+    "--dataset",
+    required=True,
+    help="Dataset name (e.g., 'tcga_luad')",
+)
+@click.option(
+    "--tile_size",
+    type=click.INT,
+    default=None,
+    help="Tile size for tiling the WSI images",
+)
+@click.option(
+    "--threshold",
+    type=click.FLOAT,
+    default=None,
+    help="Threshold for tile inclusion based on mask coverage",
+)
+@click.option(
+    "--magnification",
+    type=click.INT,
+    default=None,
+    help="magnification for tiling the WSI images",
+)
+@click.option(
+    "--num_workers",
+    type=click.INT,
+    default=1,
+    show_default=True,
+    help="Number of workers for parallel processing",
+)
+@click.option(
+    "-c",
+    "--config",
+    type=click.Path(exists=True),
+    help="Path to the configuration file",
+    default=None,
+)
 @click.option("--debug_id", default=None, help="WSI ID used for debugging.")
 def tile_wsi_task(
     dataset,
     tile_size,
     threshold,
+    magnification,
     num_workers,
-    debug_id=None,
+    config,
+    debug_id,
 ):
     """Tile WSIs for the specified dataset"""
     # if debug_id is not None:
+
+    config, masks_basedir, tiles_basedir = load_stuff(config)
+
     if debug_id:
         configure_task_logger("tile_wsi_task", dataset + "__debug")
     else:
         configure_task_logger("tile_wsi_task", dataset)
+
+    if tile_size is None:
+        tile_size = config["parameters"]["tile_size"]
+
+    if threshold is None:
+        threshold = config["parameters"]["tile_coverage"]
+
+    if magnification is None:
+        magnification = config["parameters"]["magnification"]
 
     dataset_config = config["datasets"].get(dataset)
     if not dataset_config:
@@ -291,17 +355,16 @@ def tile_wsi_task(
     tiles_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info(f"Tiling WSIs for dataset: {dataset}")
-    tile_dataset(
-        masks_dir,
-        tiles_dir,
-        tile_size=tile_size,
-        threshold=threshold,
-        num_workers_tiles=4,
-        num_workers_wsi=num_workers,
-        save_tile_overlay=True,
-        debug_id=debug_id,
-        magnification=dataset_config["magnification"],
-    )
+    tile_dataset(masks_dir,
+                 tiles_dir,
+                 tile_size=tile_size,
+                 threshold=threshold,
+                 num_workers_tiles=4,
+                 num_workers_wsi=num_workers,
+                 save_tile_overlay=True,
+                 debug_id=debug_id,
+                 magnification=magnification,
+                 save_masks=config["parameters"].get("save_masks", False))
     logger.info("WSI tiling completed.")
 
 

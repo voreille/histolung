@@ -1,5 +1,5 @@
 histoqc_masks_basedir: "data/interim/masks"
-tiles_basedir: "${TILES_BASEDIR}"
+tiles_basedir: "data/interim/tiles_672_10x"
 
 datasets:
   tcga_luad:
@@ -26,7 +26,7 @@ datasets:
     label: "LUAD"
 
 parameters:
-  tile_size: 224
+  tile_size: 672
   magnification: 10
   tile_coverage: 0.8
   save_masks: True

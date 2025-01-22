@@ -22,7 +22,7 @@ class WSITilerWithMask:
                  magnification=10,
                  tile_size=224,
                  threshold=0.8,
-                 save_mask=False,
+                 save_masks=False,
                  raise_error_mag=True,
                  save_tile_overlay=False):
         # Initialize parameters and objects
@@ -32,11 +32,11 @@ class WSITilerWithMask:
         self.output_dir = Path(output_dir) / self.wsi_id
         self.tiles_output_dir = self.output_dir / "tiles"
 
-        self.output_dir_mask = self.output_dir / "mask" if save_mask else None
+        self.output_dir_mask = self.output_dir / "mask" if save_masks else None
         self.magnification = magnification
         self.tile_size = tile_size
         self.threshold = threshold
-        self.save_mask = save_mask
+        self.save_masks = save_masks
         self.save_tile_overlay = save_tile_overlay
         self.raise_error_mag = raise_error_mag
         self.patch_metadata = []
@@ -48,7 +48,7 @@ class WSITilerWithMask:
         # Directories setup
         self.output_dir.mkdir(exist_ok=True)
         self.tiles_output_dir.mkdir(exist_ok=True)
-        if save_mask:
+        if save_masks:
             self.output_dir_mask.mkdir(exist_ok=True)
 
         # Scaling calculations
@@ -217,7 +217,7 @@ class WSITilerWithMask:
                 self.wsi_thumbnail.paste(outline, (mask_x, mask_y), outline)
 
             # Optionally save mask tile
-            if self.save_mask:
+            if self.save_masks:
                 mask_patch_image = Image.fromarray(
                     (mask_patch * 255).astype(np.uint8))
                 mask_patch_image = mask_patch_image.resize(
@@ -299,7 +299,7 @@ def main(
         magnification=magnification,
         tile_size=tile_size,
         threshold=threshold,
-        save_mask=save_mask,
+        save_masks=save_mask,
         save_tile_overlay=save_tile_overlay,
     )
 
