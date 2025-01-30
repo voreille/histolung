@@ -25,6 +25,7 @@ CONFIG = {
         "scc": 2
     },
     "debug": False,
+    "embedding_path": "data/processed/LungHist700/embeddings.npz",
 }
 
 
@@ -124,11 +125,12 @@ def evaluate_on_LungHist700_paper_fold(
                             num_workers=num_workers)
 
     # Compute or load embeddings
-    if CONFIG["debug"]:
-        embeddings = np.random.rand(len(tile_paths), 1024)
-        tile_ids = [p.stem for p in tile_paths]
+    embedding_path = project_dir / CONFIG["embedding_path"]
+    if embedding_path.exists():
+        embeddings, tile_ids = load_embeddings(CONFIG["embedding_path"])
     else:
-        embeddings, tile_ids = compute_embeddings(model, dataloader, device)
+        embeddings, tile_ids = compute_and_save_embeddings(
+            model, dataloader, output_path=embedding_path, device=device)
 
     # Validate metadata presence
     missing_tiles = set(tile_ids) - set(metadata.index)
@@ -136,11 +138,49 @@ def evaluate_on_LungHist700_paper_fold(
         raise ValueError(f"Missing metadata for tiles: {missing_tiles}")
 
     # Map labels and extract patient IDs
-    labels = [
-        CONFIG["superclass_mapping"][cls]
-        for cls in metadata.loc[tile_ids]["superclass"]
-    ]
-    patient_ids = metadata.loc[tile_ids]["patient_id"]
+    labels = list(
+        map(lambda x: CONFIG["superclass_mapping"][x],
+            metadata.loc[tile_ids]["superclass"].tolist()))
+    patient_ids = metadata.loc[tile_ids]["patient_id"].tolist()
+    image_ids = metadata.loc[tile_ids]["original_filename"].tolist()
+
+    df = pd.DataFrame(embeddings)
+    df['image_id'] = image_ids
+    df['patient_id'] = patient_ids
+
+    # Aggregate embeddings while preserving patient_id
+    averaged_df = df.groupby('image_id').agg({
+        **{
+            col: 'mean'
+            for col in df.columns if col not in ['image_id', 'patient_id']
+        },
+        'patient_id':
+        'first',  # Keep one patient_id (all are the same after consistency check)
+    })
+
+    # Convert back to numpy array if needed
+    averaged_embeddings = averaged_df.drop(columns='patient_id').to_numpy()
+    averaged_patient_ids = averaged_df['patient_id'].to_numpy()
+    image_ids = averaged_df.index.to_list()
+
+    # Ensure the shapes match
+    assert len(averaged_embeddings) == len(averaged_patient_ids)
+    grouped_metadata = metadata.groupby('original_filename').agg({
+        'patient_id':
+        lambda x: x.iloc[0] if x.nunique() == 1 else ValueError(
+            f"Inconsistent patient_ids for {x.name}"),
+        'superclass':
+        lambda x: x.iloc[0] if x.nunique() == 1 else ValueError(
+            f"Inconsistent superclass for {x.name}"),
+        'label':
+        lambda x: x.iloc[0] if x.nunique() == 1 else ValueError(
+            f"Inconsistent superclass for {x.name}")
+    })
+
+    embeddings = averaged_embeddings
+    labels = grouped_metadata.loc[image_ids]['superclass'].to_list()
+    labels = list(map(lambda x: CONFIG["superclass_mapping"][x], labels))
+    patient_ids = grouped_metadata.loc[image_ids]['patient_id'].to_list()
 
     # Split data based on patient IDs
     train_idx = [
@@ -178,6 +218,7 @@ def evaluate_on_LungHist700_paper_fold(
 def evaluate_on_LungHist700(model,
                             n_splits=5,
                             data_dir="data/processed/LungHist700/",
+                            magnification="both",
                             batch_size=128,
                             num_workers=12,
                             device="cuda",
@@ -195,11 +236,13 @@ def evaluate_on_LungHist700(model,
                             batch_size=batch_size,
                             num_workers=num_workers)
 
-    if CONFIG["debug"]:
-        embeddings = np.random.rand(5636, 1024)
-        tile_ids = [p.stem for p in tiles_dir.glob("*.png")]
+    # Compute or load embeddings
+    embedding_path = project_dir / CONFIG["embedding_path"]
+    if embedding_path.exists():
+        embeddings, tile_ids = load_embeddings(CONFIG["embedding_path"])
     else:
-        embeddings, tile_ids = compute_embeddings(model, dataloader, device)
+        embeddings, tile_ids = compute_and_save_embeddings(
+            model, dataloader, output_path=embedding_path, device=device)
 
     missing_tiles = set(tile_ids) - set(metadata.index)
     if missing_tiles:
@@ -209,6 +252,57 @@ def evaluate_on_LungHist700(model,
         map(lambda x: CONFIG["superclass_mapping"][x],
             metadata.loc[tile_ids]["superclass"].tolist()))
     patient_ids = metadata.loc[tile_ids]["patient_id"].tolist()
+    image_ids = metadata.loc[tile_ids]["original_filename"].tolist()
+
+    df = pd.DataFrame(embeddings)
+    df['image_id'] = image_ids
+    df['patient_id'] = patient_ids
+
+    # Check consistency of patient_id within each image_id
+    def check_patient_id_consistency(group):
+        unique_patient_ids = group['patient_id'].unique()
+        if len(unique_patient_ids) > 1:
+            raise ValueError(
+                f"Inconsistent patient IDs for image_id '{group.name}': {unique_patient_ids}"
+            )
+        return group
+
+    df = df.groupby('image_id',
+                    group_keys=False).apply(check_patient_id_consistency)
+
+    # Aggregate embeddings while preserving patient_id
+    averaged_df = df.groupby('image_id').agg({
+        **{
+            col: 'mean'
+            for col in df.columns if col not in ['image_id', 'patient_id']
+        },
+        'patient_id':
+        'first',  # Keep one patient_id (all are the same after consistency check)
+    })
+
+    # Convert back to numpy array if needed
+    averaged_embeddings = averaged_df.drop(columns='patient_id').to_numpy()
+    averaged_patient_ids = averaged_df['patient_id'].to_numpy()
+    image_ids = averaged_df.index.to_list()
+
+    # Ensure the shapes match
+    assert len(averaged_embeddings) == len(averaged_patient_ids)
+    grouped_metadata = metadata.groupby('original_filename').agg({
+        'patient_id':
+        lambda x: x.iloc[0] if x.nunique() == 1 else ValueError(
+            f"Inconsistent patient_ids for {x.name}"),
+        'superclass':
+        lambda x: x.iloc[0] if x.nunique() == 1 else ValueError(
+            f"Inconsistent superclass for {x.name}"),
+        'label':
+        lambda x: x.iloc[0] if x.nunique() == 1 else ValueError(
+            f"Inconsistent superclass for {x.name}")
+    })
+
+    embeddings = averaged_embeddings
+    labels = grouped_metadata.loc[image_ids]['superclass'].to_list()
+    labels = list(map(lambda x: CONFIG["superclass_mapping"][x], labels))
+    patient_ids = grouped_metadata.loc[image_ids]['patient_id'].to_list()
 
     if verbose:
         print(f"Number of tiles: {len(tile_ids)}")
@@ -292,6 +386,7 @@ if __name__ == "__main__":
     )
 
     device = get_device(gpu_id=1)
+    # accuracy, results_df, conf_matrix = evaluate_on_LungHist700_paper_fold(
     accuracy, results_df, conf_matrix = evaluate_on_LungHist700(
         model,
         verbose=True,
@@ -303,6 +398,8 @@ if __name__ == "__main__":
     results_df.to_csv("evaluation_results.csv", index=False)
 
     # Display confusion matrix
+    conf_matrix = conf_matrix.astype(np.float64) / conf_matrix.sum(
+        axis=1, keepdims=True)
     ConfusionMatrixDisplay(
         conf_matrix,
         display_labels=["nor", "aca", "scc"],

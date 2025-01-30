@@ -22,7 +22,7 @@ outline_folder.mkdir(parents=True, exist_ok=True)
 # Define tile size and desired magnification
 tile_size = 224
 desired_magnification = 10
-tile_dataset = False
+tile_dataset = True
 
 # Define border styles
 border_styles = [
