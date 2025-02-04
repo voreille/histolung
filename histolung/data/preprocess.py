@@ -201,6 +201,36 @@ def run_histoqc_task(dataset, num_workers, config):
 @click.option("--dataset",
               required=True,
               help="Dataset name (e.g., 'tcga_luad')")
+@click.option("--num_workers",
+              default=1,
+              show_default=True,
+              help="Number of workers for parallel processing")
+@click.option("-c",
+              "--config",
+              type=click.Path(exists=True),
+              help="Path to the configuration file",
+              default=None)
+def run_superpixel_segmentation(dataset, num_workers, config):
+    """Run HistoQC on the specified dataset."""
+    config, masks_basedir, _ = load_stuff(config)
+    configure_task_logger("histoqc", dataset)
+    dataset_config = config["datasets"].get(dataset)
+    logger.info(f"Using dataset_config: {dataset_config}")
+
+    if not dataset_config:
+        raise click.BadParameter(
+            f"Dataset '{dataset}' not found in configuration.")
+
+    input_dir = Path(dataset_config["data_dir"])
+    masks_dir = masks_basedir / dataset
+    masks_dir.mkdir(parents=True, exist_ok=True)
+
+    histoqc_config_mapping = dataset_config.get("histoqc_config_mapping")
+
+@cli.command()
+@click.option("--dataset",
+              required=True,
+              help="Dataset name (e.g., 'tcga_luad')")
 @click.option("-c",
               "--config",
               type=click.Path(exists=True),

@@ -2,6 +2,14 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Debug current file",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": []
+        },
+        {
             "name": "Debug run_histoqc_task",
             "type": "debugpy",
             "request": "launch",
@@ -147,13 +155,5 @@
             "console": "integratedTerminal",
             "justMyCode": true
         },
-        {
-            "name": "Debug current file",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${file}",
-            "console": "integratedTerminal",
-            "args": []
-        }
     ]
 }

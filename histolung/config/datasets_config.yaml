@@ -30,3 +30,8 @@ parameters:
   magnification: 10
   tile_coverage: 0.8
   save_masks: True
+  superpixel:
+    sigma: 1
+    start_label: 1
+    compactness: 10
+    average_tile_size: 672
