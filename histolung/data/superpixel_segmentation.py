@@ -1,6 +1,7 @@
 import os
 import logging
 from pathlib import Path
+import multiprocessing
 
 import openslide
 import numpy as np
@@ -60,16 +61,55 @@ def generate_overlay(wsi_image, segments):
     return Image.blend(wsi_image, seg_img, alpha)
 
 
-def superpixel_segmentation(raw_data_dir,
-                            masks_dir,
-                            output_dir,
-                            average_tile_size=672,
-                            save_overlay=True,
-                            debug=False,
-                            **kwargs):
+def process_single_mask(args):
+    """Function to process a single mask, used for parallel processing."""
+    mask_path, raw_data_dir, output_segments, output_overlay, average_tile_size, save_overlay, kwargs = args
+
+    wsi_filename = mask_path.stem
+    wsi_id = wsi_filename.replace(".svs_mask_use", "")
+
+    # Find matching WSI
+    matching_wsis = [
+        f for f in raw_data_dir.rglob(f"*{wsi_id}*")
+        if f.suffix in OPENSLIDE_EXTENSIONS
+    ]
+
+    if len(matching_wsis) > 1:
+        logger.error(
+            f"Multiple WSIs match ID '{wsi_id}', please check the dataset.")
+        return
+    if len(matching_wsis) == 0:
+        logger.warning(f"No WSI found for '{wsi_id}', skipping...")
+        return
+
+    wsi_slide = openslide.OpenSlide(matching_wsis[0])
+    image_resized, segments = superpixel_segmentation_one_image(
+        wsi_slide, mask_path, average_tile_size=average_tile_size, **kwargs)
+
+    # Save segmentation mask
+    np.save(output_segments / f"{wsi_id}_segments.npy",
+            segments)  # NumPy format
+    imsave(output_segments / f"{wsi_id}_segments.tiff",
+           segments.astype(np.uint16))  # TIFF format
+
+    # Save overlay image
+    if save_overlay:
+        overlay_image = generate_overlay(image_resized, segments)
+        overlay_image.save(output_overlay / f"{wsi_id}__overlay.png")
+
+
+def superpixel_segmentation(
+        raw_data_dir,
+        masks_dir,
+        output_dir,
+        average_tile_size=672,
+        save_overlay=True,
+        debug=False,
+        num_workers=None,  # Set to None for automatic CPU allocation
+        **kwargs):
     """
     Perform superpixel segmentation for all WSIs found in raw_data_dir using their corresponding masks.
-    Saves segmentation masks and optionally overlay images.
+    Uses multiprocessing to speed up execution.
     """
     raw_data_dir = Path(raw_data_dir).resolve()
     masks_dir = Path(masks_dir).resolve()
@@ -83,52 +123,26 @@ def superpixel_segmentation(raw_data_dir,
 
     masks_path = list(masks_dir.rglob("*svs_mask_use.png"))
 
-    for i, mask_path in tqdm(enumerate(masks_path),
-                             total=len(masks_path),
-                             desc=f"Processing WSIs in {masks_dir.name}",
-                             leave=True):
-        wsi_filename = mask_path.stem
-        wsi_id = wsi_filename.replace(".svs_mask_use", "")
+    # Prepare arguments for multiprocessing
+    args_list = [(mask_path, raw_data_dir, output_segments, output_overlay,
+                  average_tile_size, save_overlay, kwargs)
+                 for mask_path in masks_path]
 
-        # Find matching WSI
-        matching_wsis = [
-            f for f in raw_data_dir.rglob(f"*{wsi_id}*")
-            if f.suffix in OPENSLIDE_EXTENSIONS
-        ]
+    # Define number of processes (default: all available CPUs)
+    num_workers = num_workers or min(multiprocessing.cpu_count(),
+                                     len(masks_path))
 
-        if len(matching_wsis) > 1:
-            logger.error(
-                f"Multiple WSIs match ID '{wsi_id}', please check the dataset."
-            )
-            raise ValueError(
-                f"Multiple WSIs match ID '{wsi_id}', please check the dataset."
-            )
+    logger.info(f"Starting parallel processing with {num_workers} workers.")
 
-        if len(matching_wsis) == 0:
-            logger.warning(f"No WSI found for '{wsi_id}', skipping...")
-            continue
+    # Run processing in parallel
+    with multiprocessing.Pool(processes=num_workers) as pool:
+        list(
+            tqdm(pool.imap_unordered(process_single_mask, args_list),
+                 total=len(args_list),
+                 desc="Processing WSIs",
+                 leave=True))
 
-        wsi_slide = openslide.OpenSlide(matching_wsis[0])
-        image_resized, segments = superpixel_segmentation_one_image(
-            wsi_slide,
-            mask_path,
-            average_tile_size=average_tile_size,
-            **kwargs)
-
-        # Save segmentation mask
-        np.save(output_segments / f"{wsi_id}_segments.npy",
-                segments)  # NumPy format
-        imsave(output_segments / f"{wsi_id}_segments.tiff",
-               segments.astype(np.uint16))  # TIFF format
-
-        # Save overlay image
-        if save_overlay:
-            overlay_image = generate_overlay(image_resized, segments)
-            overlay_image.save(output_overlay / f"{wsi_id}__overlay.png")
-
-        if debug and i >= 10:
-            logger.debug(f"Processed {i+1} WSIs, stopping due to debug mode.")
-            break
+    logger.info("Superpixel segmentation completed.")
 
 
 def superpixel_segmentation_one_image(slide,
@@ -194,7 +208,7 @@ if __name__ == "__main__":
     tcga_path = Path(os.getenv("TCGA_DATA_RAW_PATH"))
     project_dir = Path(__file__).parents[2].resolve()
     masks_path = project_dir / "data/interim/masks"
-    output_dir = project_dir / "data/interim/debug_superpixels"
+    output_dir = project_dir / "data/interim/superpixels"
     output_dir.mkdir(exist_ok=True)
 
     data_paths = {
@@ -235,5 +249,6 @@ if __name__ == "__main__":
             output_dir=paths["output_dir"],
             save_overlay=True,
             debug=True,
+            num_workers=24,
             **config,
         )
