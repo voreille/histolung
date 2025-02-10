@@ -36,7 +36,7 @@ class BaseFeatureExtractor(ABC, nn.Module):
         if std is None:
             std = [0.229, 0.224, 0.225]
         return T.Compose([
-            T.ToPILImage(),
+            # T.ToPILImage(),
             T.Resize((image_size, image_size)),
             T.ToTensor(),
             T.Normalize(mean=mean, std=std),

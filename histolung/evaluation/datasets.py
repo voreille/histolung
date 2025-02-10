@@ -4,6 +4,7 @@ from torch.utils.data import Dataset
 import torch
 from sklearn.model_selection import StratifiedGroupKFold, StratifiedKFold
 import pyspng
+from PIL import Image
 
 
 def get_dataset_manager(dataset_name, metadata_df, transform=None):
@@ -125,19 +126,48 @@ class WSSS4LUADDatasetManager(BaseDatasetManager):
             raise ValueError("Metadata is missing the 'mask_path' column.")
 
 
+# class TileDataset(Dataset):
+
+#     def __init__(self, tile_paths, preprocess=None, transform=None):
+#         """
+#         Dataset for histopathology tiles.
+#         Args:
+#             tile_paths: List or array of paths to tile images.
+#             labels: List or array of labels corresponding to the tiles.
+#             transform: Transformations to apply to the images.
+#         """
+
+#         self.tile_paths = tile_paths
+#         self.preprocess = preprocess
+#         self.transform = transform
+
+#     def __len__(self):
+#         return len(self.tile_paths)
+
+#     def __getitem__(self, idx):
+#         tile_path = self.tile_paths[idx]
+#         with open(tile_path, 'rb') as f:
+#             image = pyspng.load(f.read())
+
+#         if self.transform:
+#             image = self.transform(image)
+
+#         if self.preprocess:
+#             image = self.preprocess(image).type(torch.FloatTensor)
+#         return image, self.tile_paths[idx].stem
+
+
 class TileDataset(Dataset):
 
-    def __init__(self, tile_paths, preprocess=None, transform=None):
+    def __init__(self, tile_paths, transform=None):
         """
-        Dataset for histopathology tiles.
-        Args:
-            tile_paths: List or array of paths to tile images.
-            labels: List or array of labels corresponding to the tiles.
-            transform: Transformations to apply to the images.
-        """
+        Tile-level dataset that returns individual tile images from a list of paths.
 
+        Args:
+            tile_paths (list): List of paths to tile images for a WSI.
+            transform (callable, optional): Transform to apply to each tile image.
+        """
         self.tile_paths = tile_paths
-        self.preprocess = preprocess
         self.transform = transform
 
     def __len__(self):
@@ -145,14 +175,11 @@ class TileDataset(Dataset):
 
     def __getitem__(self, idx):
         tile_path = self.tile_paths[idx]
-        with open(tile_path, 'rb') as f:
-            image = pyspng.load(f.read())
+        image = Image.open(tile_path).convert("RGB")  # Load as PIL image
 
         if self.transform:
-            image = self.transform(image)
+            image = self.transform(image)  # Apply augmentation
 
-        if self.preprocess:
-            image = self.preprocess(image).type(torch.FloatTensor)
         return image, self.tile_paths[idx].stem
 
 
