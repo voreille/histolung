@@ -1,5 +1,6 @@
 import torch
 from torch.utils.data import Dataset
+import torch.nn.functional as F
 import pyspng
 import h5py
 import numpy as np
@@ -138,3 +139,102 @@ class HDF5EmbeddingDataset(Dataset):
     def __del__(self):
         """Ensure the HDF5 file is closed when the dataset object is deleted."""
         self.close_hdf5()
+
+
+class EmbeddingDataset(Dataset):
+    """
+    Dataset class for handling WSIs with an option for preloading embeddings.
+
+    Args:
+        hdf5_filepath (str): Path to the HDF5 file containing embeddings.
+        wsi_ids (list of str): List of WSI IDs corresponding to the embeddings.
+        labels (list of int): List of labels for each WSI.
+        preloading (bool): If True, preload all embeddings into memory.
+    """
+
+    def __init__(self,
+                 hdf5_filepath,
+                 wsi_ids,
+                 labels,
+                 label_map=None,
+                 preloading=False):
+        self.hdf5_filepath = hdf5_filepath
+        self.wsi_ids = wsi_ids
+        self.labels = labels
+        self.preloading = preloading
+        self.label_map = label_map
+        self.embeddings = None
+        self.num_classes = len(label_map.keys())
+
+        if self.preloading:
+            self.embeddings = {}
+            self._preload_embeddings()
+
+    def _preload_embeddings(self):
+        """Preload all embeddings into memory."""
+        print("Preloading embeddings into memory...")
+        with h5py.File(self.hdf5_filepath, 'r') as hdf5_file:
+            for wsi_id in self.wsi_ids:
+                self.embeddings[wsi_id] = torch.tensor(
+                    hdf5_file['embeddings'][wsi_id][:])
+        print("Preloading complete.")
+
+    def __len__(self):
+        return len(self.wsi_ids)
+
+    def __getitem__(self, idx):
+        wsi_id = self.wsi_ids[idx]
+        label = self.label_map[self.labels[idx]]
+        labels_one_hot = F.one_hot(torch.tensor(label),
+                                   num_classes=self.num_classes)
+
+        if self.preloading:
+            embeddings = self.embeddings[wsi_id]
+        else:
+            # Load embeddings on demand
+            with h5py.File(self.hdf5_filepath, 'r') as hdf5_file:
+                embeddings = torch.tensor(hdf5_file['embeddings'][wsi_id][:])
+
+        return wsi_id, embeddings, labels_one_hot
+
+
+class PreloadedEmbeddingDataset(Dataset):
+
+    def __init__(self, wsi_ids, embeddings, labels_dict):
+        self.wsi_ids = wsi_ids
+        self.labels_dict = labels_dict
+        self.embeddings = embeddings
+
+    def __len__(self):
+        return len(self.wsi_ids)
+
+    def __getitem__(self, idx):
+        wsi_id = self.wsi_ids[idx]
+        labels_one_hot = self.labels_dict[wsi_id]
+
+        embeddings = self.embeddings[wsi_id]
+
+        return wsi_id, embeddings, labels_one_hot
+
+
+class IndexedEmbeddingDataset(Dataset):
+
+    def __init__(self, wsi_ids, embeddings, labels_numeric, indices=None):
+        self.wsi_ids = wsi_ids
+        self.embeddings = embeddings
+        self.labels_numeric = labels_numeric
+        if indices is not None:
+            self.indices = indices
+        else:
+            self.indices = list(range(len(wsi_ids)))  # Default: all data
+
+    def __len__(self):
+        return len(self.indices)
+
+    def __getitem__(self, idx):
+        real_idx = self.indices[idx]  # Map to original index
+        return (
+            self.wsi_ids[real_idx],
+            self.embeddings[real_idx],
+            self.labels_numeric[real_idx],
+        )

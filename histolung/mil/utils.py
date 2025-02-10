@@ -2,14 +2,17 @@ import logging
 import json
 
 import pandas as pd
+import h5py
 import torch
 import torchvision.transforms as T
 from torch.nn import BCEWithLogitsLoss
 from torch.optim import Adam, SGD, AdamW, RMSprop
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, RandomSampler
 
 from histolung.mil.loss import FocalBCEWithLogitsLoss
-from histolung.mil.data_loader import WSIDataset
+from histolung.mil.data_loader import (WSIDataset, EmbeddingDataset,
+                                       PreloadedEmbeddingDataset,
+                                       IndexedEmbeddingDataset)
 
 
 def load_metadata(project_dir):
@@ -38,7 +41,7 @@ def split_by_fold(wsi_metadata, fold_df):
     return output, n_folds
 
 
-def get_loss_function(loss_name, device="gpu", **kwargs):
+def get_loss_function(loss_name, **kwargs):
     loss_dict = {
         "BCEWithLogitsLoss": BCEWithLogitsLoss,
         "FocalBinaryCrossEntropy": FocalBCEWithLogitsLoss,
@@ -54,14 +57,29 @@ def get_loss_function(loss_name, device="gpu", **kwargs):
 
     # Check if 'weight' is in kwargs and convert it to a tensor
     if 'weight' in kwargs and not isinstance(kwargs['weight'], torch.Tensor):
-        kwargs['weight'] = torch.tensor(kwargs['weight'],
-                                        dtype=torch.float,
-                                        device=device)
+        kwargs['weight'] = torch.tensor(
+            kwargs['weight'],
+            dtype=torch.float,
+        )
 
+    # if kwargs:
+    #     return loss_class(**kwargs)
+    # return loss_class()
     return loss_class(**kwargs)
 
 
-def get_optimizer(net, optimizer_name, **kwargs):
+def get_optimizer(parameters, optimizer_name, **kwargs):
+    """
+    Factory function to create an optimizer.
+
+    Args:
+        name (str): Name of the optimizer (e.g., "adam", "sgd").
+        parameters: Model's parameters to optimize.
+        **kwargs: Additional arguments for the optimizer.
+
+    Returns:
+        torch.optim.Optimizer: The instantiated optimizer.
+    """
     optimizer_dict = {
         "Adam": Adam,
         "AdamW": AdamW,
@@ -76,7 +94,41 @@ def get_optimizer(net, optimizer_name, **kwargs):
     if optimizer_class is None:
         raise ValueError(f"Optimizer '{optimizer_name}' not supported")
 
-    return optimizer_class(net.parameters(), **kwargs)
+    return optimizer_class(parameters, **kwargs)
+
+
+def get_scheduler(optimizer, name, **kwargs):
+    """
+    Factory function to create a learning rate scheduler.
+
+    Args:
+        name (str): Name of the scheduler (e.g., "StepLR", "CosineAnnealingLR").
+        optimizer: Optimizer to attach the scheduler to.
+        **kwargs: Additional arguments for the scheduler.
+
+    Returns:
+        torch.optim.lr_scheduler._LRScheduler or dict: The instantiated scheduler.
+    """
+
+    schedulers_dict = {
+        "StepLR": torch.optim.lr_scheduler.StepLR,
+        "CosineAnnealingLR": torch.optim.lr_scheduler.CosineAnnealingLR,
+        "ReduceLROnPlateau": torch.optim.lr_scheduler.ReduceLROnPlateau,
+    }
+
+    scheduler_class = schedulers_dict.get(name)
+    if scheduler_class is None:
+        raise ValueError(f"Unsupported scheduler: {name}")
+
+    if name == "ReduceLROnPlateau":
+        return {
+            "scheduler": scheduler_class(optimizer, **kwargs),
+            "monitor": kwargs.get("monitor", "val_loss"),
+            "interval": kwargs.get("interval", "epoch"),
+            "frequency": kwargs.get("frequency", 1),
+        }
+
+    return scheduler_class(optimizer, **kwargs)
 
 
 def get_wsi_dataloaders(wsi_metadata_by_folds, fold, label_map, batch_size=2):
@@ -106,6 +158,81 @@ def get_wsi_dataloaders(wsi_metadata_by_folds, fold, label_map, batch_size=2):
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
     return {"train": train_loader, "val": val_loader}
+
+
+def collate_fn_ragged(batch):
+    wsi_ids, embeddings, labels = zip(*batch)
+    return list(wsi_ids), list(embeddings), torch.stack(labels)
+
+
+def get_preloadedembedding_dataloaders(
+    wsi_ids,
+    embeddings,
+    labels_numeric,
+    indices,
+    batch_size=1,
+    shuffle=True,
+    num_workers=55,
+    prefetch_factor=2,
+    pin_memory=False,
+    resample=None,
+):
+    dataset = IndexedEmbeddingDataset(
+        wsi_ids,
+        embeddings,
+        labels_numeric,
+        indices=indices,
+    )
+    if resample:
+        num_samples = 1000 * batch_size  # 1000 steps * batch size 512
+        sampler = RandomSampler(dataset,
+                                replacement=True,
+                                num_samples=num_samples)
+        shuffle = False
+    else:
+        sampler = None
+
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        collate_fn=collate_fn_ragged,
+        num_workers=num_workers,
+        prefetch_factor=prefetch_factor,
+        pin_memory=pin_memory,
+        sampler=sampler,
+    )
+
+
+def get_embedding_dataloaders(
+    wsi_ids,
+    labels,
+    hdf5_filepath,
+    batch_size=1,
+    preloading=True,
+    shuffle=True,
+    label_map=None,
+    num_workers=55,
+    prefetch_factor=2,
+    pin_memory=False,
+):
+
+    dataset = EmbeddingDataset(
+        hdf5_filepath,
+        wsi_ids,
+        labels,
+        preloading=preloading,
+        label_map=label_map,
+    )
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        collate_fn=collate_fn_ragged,
+        num_workers=num_workers,
+        prefetch_factor=prefetch_factor,
+        pin_memory=pin_memory,
+    )
 
 
 def get_preprocessing(data_cfg):

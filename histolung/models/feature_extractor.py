@@ -28,12 +28,15 @@ class BaseFeatureExtractor(ABC, nn.Module):
     def load_model(self):
         pass
 
-    def get_preprocessing(self, data_cfg):
-        image_size = data_cfg["image_size"]
-        mean = data_cfg["mean"]
-        std = data_cfg["std"]
+    
+    def get_preprocessing(self, image_size=224, mean=None, std=None):
+        # TODO: change the call of this function in other part of the program
+        if mean is None:
+            mean = [0.485, 0.456, 0.406]
+        if std is None:
+            std = [0.229, 0.224, 0.225]
         return T.Compose([
-            T.ToPILImage(),
+            # T.ToPILImage(),
             T.Resize((image_size, image_size)),
             T.ToTensor(),
             T.Normalize(mean=mean, std=std),

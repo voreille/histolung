@@ -178,3 +178,5 @@ logs/
 reports/notebooks/explo_dev_stuffs.ipynb
 checkpoints/
 /histolung/tests/assets/
+mlflow/
+mlruns/

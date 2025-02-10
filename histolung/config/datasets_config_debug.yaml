@@ -1,37 +1,29 @@
-histoqc_masks_basedir: "data/interim/masks"
-tiles_basedir: "${TILES_BASEDIR}"
-
 datasets:
   tcga_luad:
     data_dir: "${TCGA_DATA_RAW_PATH}/LUAD"
     default_histoqc_config_path: "histolung/config/HistoQC/config_light.ini"
     histoqc_config_mapping: "data/interim/histoqc_config_mapping/tcga_luad_complete.yaml"
+    magnification: 10
     label: "LUAD"
   tcga_lusc:
     data_dir: "${TCGA_DATA_RAW_PATH}/LUSC"
     default_histoqc_config_path: "histolung/config/HistoQC/config_light.ini"
     histoqc_config_mapping: "data/interim/histoqc_config_mapping/tcga_lusc_complete.yaml"
+    magnification: 10
     label: "LUSC"
-  cptac_lusc:
+  cptac_lscc:
     data_dir: "${CPTAC_DATA_RAW_PATH}/CPTAC-LSCC_v10/LSCC"
     input_pattern: "*.svs"
     default_histoqc_config_path: "histolung/config/HistoQC/config_light.ini"
-    histoqc_config_mapping: "data/interim/histoqc_config_mapping/cptac_lusc_complete.yaml"
+    magnification: 10
     label: "LUSC"
   cptac_luad:
     data_dir: "${CPTAC_DATA_RAW_PATH}/CPTAC-LUAD_v12/LUAD"
     input_pattern: "*.svs"
-    histoqc_config_mapping: "data/interim/histoqc_config_mapping/cptac_luad_complete.yaml"
+    histoqc_config_mapping: "data/interim/wsi_to_config_map/cptac_luad_mapping.csv"
     default_histoqc_config_path: "histolung/config/HistoQC/config_light.ini"
+    magnification: 10
     label: "LUAD"
 
-parameters:
-  tile_size: 224
-  magnification: 10
-  tile_coverage: 0.8
-  save_masks: True
-  superpixel:
-    sigma: 1
-    start_label: 1
-    compactness: 10
-    average_tile_size: 672
+histoqc_masks_basedir: "data/interim/masks"
+tiles_basedir: "${TILES_BASEDIR}"

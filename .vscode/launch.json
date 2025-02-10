@@ -2,6 +2,14 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Debug current file",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": []
+        },
+        {
             "name": "Debug run_histoqc_task",
             "type": "debugpy",
             "request": "launch",
@@ -9,7 +17,7 @@
             "args": [
                 "run-histoqc-task",
                 "--dataset",
-                "tcga_luad",
+                "cptac_lusc",
                 "--num_workers",
                 "12",
             ],
@@ -35,16 +43,13 @@
             "args": [
                 "tile-wsi-task",
                 "--dataset",
-                "tcga_luad",
-                "--tile_size",
-                "224",
-                "--threshold",
-                "0.8",
+                "tcga_lusc",
                 "--num_workers",
                 "12",
-                "--save_tile_overlay",
                 "--debug_id",
-                "TCGA-55-7910-01Z-00-DX1",
+                "TCGA-21-1080-01Z-00-DX1",
+                "-c",
+                "/home/valentin/workspaces/histolung/histolung/config/datasets_config_ts_672_10x.yaml",
             ],
             "console": "integratedTerminal"
         },
@@ -105,7 +110,11 @@
             "args": [
                 "train",
                 "--id",
-                "experiment1"
+                "experiment1",
+                "--gpu-id",
+                "1",
+                // "--debug-max-samples",
+                // "10"
             ],
             "console": "integratedTerminal",
             "justMyCode": true,
@@ -146,13 +155,5 @@
             "console": "integratedTerminal",
             "justMyCode": true
         },
-        {
-            "name": "Debug current file",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${file}",
-            "console": "integratedTerminal",
-            "args": []
-        }
     ]
 }

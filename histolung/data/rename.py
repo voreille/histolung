@@ -17,15 +17,16 @@ def rename_tcga(folder_name):
 
 
 def rename_cptac(folder_name):
-    """Extracts the CPTAC ID with a different rule (customize as needed)."""
-    return folder_name.split("-v")[0]  # Example for CPTAC
+    """Extracts the CPTAC ID by splitting at the first period."""
+    return folder_name.split(".")[0]  # Example for CPTAC
 
 
 # Configuration dictionary for datasets and their renaming functions
 RENAMING_RULES = {
     "tcga_luad": rename_tcga,
     "tcga_lusc": rename_tcga,
-    "cptac_lscc": rename_cptac,
+    "cptac_lusc": rename_cptac,
+    "cptac_luad": rename_cptac,
     # Add other datasets and their corresponding functions here
 }
 
@@ -79,7 +80,8 @@ def rename_masks_with_copy(masks_dir, dataset_name):
     if not renaming_function:
         logger.warning(
             f"No renaming rule for dataset {dataset_name}. Skipping.")
-        return
+        raise ValueError(
+            f"No renaming rule for dataset {dataset_name}. Skipping.")
 
     # Define paths
     masks_out_dir = masks_dir / "output"
@@ -141,9 +143,53 @@ def rename_masks_with_copy(masks_dir, dataset_name):
     logger.info(f"Deleted original directory {masks_out_dir}.")
 
 
+OPENS_SLIDE_EXTENSIONS = {
+    ".svs", ".tiff", ".vms", ".vmu", ".ndpi", ".scn", ".mrxs", ".tif"
+}
 
-def write_wsi_paths_to_csv(results_tsv: str, output_csv: str, dataset: str,
-                           config: dict):
+
+def write_wsi_paths_to_csv(
+    raw_data_dir: str,
+    masks_dir: str,
+    output_csv: str,
+    dataset: str,
+):
+    raw_data_dir = Path(raw_data_dir)
+    masks_dir = Path(masks_dir)
+
+    # Find all mask files
+    mask_files = [f for f in masks_dir.rglob("*mask_use.png")]
+    wsi_ids = {f.name.split(".")[0]
+               for f in mask_files}  # Use a set for efficient lookup
+
+    # Define the renaming function for the dataset
+    rename_func = RENAMING_RULES.get(dataset)
+    if not rename_func:
+        raise ValueError(f"No renaming function found for dataset: {dataset}")
+
+    # Map WSI IDs to their paths
+    path_to_wsi_id = {
+        rename_func(f.name): f
+        for f in raw_data_dir.rglob("*") if f.is_file()
+        and f.suffix.lower() in OPENS_SLIDE_EXTENSIONS  # Filter by extension
+        and rename_func(f.name) in wsi_ids
+    }
+
+    # Check for any missing WSI IDs
+    missing_wsi_ids = wsi_ids - set(path_to_wsi_id.keys())
+    if missing_wsi_ids:
+        print(
+            f"Warning: The following WSI IDs are missing in raw data: {missing_wsi_ids}"
+        )
+
+    # Create a DataFrame and save to CSV
+    df = pd.DataFrame(list(path_to_wsi_id.items()), columns=["WSI_ID", "Path"])
+    df.to_csv(output_csv, index=False)
+    print(f"CSV file saved to {output_csv}")
+
+
+def write_wsi_paths_to_csv_old(results_tsv: str, output_csv: str, dataset: str,
+                               config: dict):
     """
     Extracts paths to WSI (Whole Slide Image) files from a results.tsv file, applies renaming rules, 
     and saves the paths with their corresponding WSI IDs to a CSV file.

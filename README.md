@@ -19,17 +19,11 @@ A short description of the project.
 - [ ] Include MLFlow
 - [ ] Implement a system to map embeddings with a set of parameters
 
-Task: implement MIL from embeddings
-progress: Check pytorch lighting, in 'train_from_embeddings_old.py', adapt the run_experiments.py
-
-Task: implement hyperparamter searching
 
 Task: check tissue folding tcga_lusc ID:TCGA-21-1080-01Z-00-DX1
 
-Task: put a check to see if there are no tiles and warn and log?
-
 Task: change histoqc config to make it work for ID:
-no mask: TCGA-44-7661-01Z-00-DX1, TCGA-55-8204-01Z-00-DX1, TCGA-55-8204-01Z-00-DX1
+no mask: TCGA-44-7661-01Z-00-DX1 (too blurry), TCGA-55-8204-01Z-00-DX1, TCGA-55-8204-01Z-00-DX1
 not enough mask: TCGA-05-4249-01Z-00-DX1, TCGA-44-6777-01Z-00-DX1, TCGA-55-1595-01Z-00-DX1, TCGA-55-7284-01Z-00-DX1, TCGA-55-8092-01Z-00-DX1, 
 folding: TCGA-44-6774-01Z-00-DX1, TCGA-44-6775-01Z-00-DX1, TCGA-49-AAR3-01Z-00-DX1, TCGA-55-5899-01Z-00-DX1(a lot!!!), TCGA-NJ-A7XG-01Z-00-DX1 (weird)
 weird bubble: TCGA-49-6743-01Z-00-DX3, TCGA-49-6745-01Z-00-DX5
