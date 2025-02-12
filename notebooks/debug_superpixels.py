@@ -2,21 +2,24 @@ from pathlib import Path
 from PIL import Image
 import openslide
 import numpy as np
+from tqdm import tqdm
+from concurrent.futures import ProcessPoolExecutor
 
 # Constants
 SEGMENTS_DIR = Path(
-    "/home/valentin/workspaces/histolung/data/interim/debug_superpixels/segments/"
-)
+    "/home/valentin/workspaces/histolung/data/interim/superpixels")
 CPTAC_PATH = Path("/mnt/nas6/data/CPTAC")
+TCGA_PATH = Path("/mnt/nas7/data/TCGA_Lung_svs")
 TARGET_AVERAGE_AREA = 672**2  # µm²
 
 
 def get_wsi_path(wsi_id):
-    """Find the corresponding WSI file."""
-    wsi_file = next(CPTAC_PATH.rglob(f"{wsi_id}*.svs"), None)
-    if not wsi_file:
-        raise FileNotFoundError(f"No WSI found for {wsi_id}")
-    return wsi_file
+    """Find the corresponding WSI file in CPTAC or TCGA."""
+    for dataset_path in [CPTAC_PATH, TCGA_PATH]:
+        wsi_file = next(dataset_path.rglob(f"{wsi_id}*.svs"), None)
+        if wsi_file:
+            return wsi_file
+    raise FileNotFoundError(f"No WSI found for {wsi_id} in CPTAC or TCGA")
 
 
 def compute_scale_factor(wsi_image, mask_size):
@@ -34,41 +37,50 @@ def get_mpp(wsi_image):
 
 def process_superpixel_mask(superp_segments_path):
     """Process a single superpixel segmentation mask to compute areas."""
-    superp_mask = Image.open(superp_segments_path)
-    wsi_id = superp_segments_path.stem.replace("_segments", "")
+    try:
+        superp_mask = Image.open(superp_segments_path)
+        wsi_id = superp_segments_path.stem.replace("_segments", "")
 
-    # Find corresponding WSI
-    wsi_image = openslide.OpenSlide(str(get_wsi_path(wsi_id)))
+        # Find corresponding WSI
+        wsi_image = openslide.OpenSlide(str(get_wsi_path(wsi_id)))
 
-    # Compute scale factor and MPP
-    scale_factor = compute_scale_factor(wsi_image, superp_mask.size)
-    mpp_x = get_mpp(wsi_image)
+        # Compute scale factor and MPP
+        scale_factor = compute_scale_factor(wsi_image, superp_mask.size)
+        mpp_x = get_mpp(wsi_image)
 
-    # Convert segmentation mask to NumPy array and filter labels
-    np_mask = np.array(superp_mask)
-    labels = np.unique(np_mask)
-    labels = labels[labels != 0]  # Remove background label (0)
+        # Convert segmentation mask to NumPy array and filter labels
+        np_mask = np.array(superp_mask)
+        labels = np.unique(np_mask)
+        labels = labels[labels != 0]  # Remove background label (0)
 
-    # Compute superpixel areas
-    areas_pixels = [np.sum(np_mask == label) for label in labels]
+        # Compute superpixel areas
+        areas_pixels = np.bincount(
+            np_mask.flatten())[labels]  # Efficient area computation
 
-    # Convert areas from pixels² to µm²
-    pixel_to_micron = (mpp_x * scale_factor)**2
-    areas_microns = [area * pixel_to_micron for area in areas_pixels]
+        # Convert areas from pixels² to µm²
+        pixel_to_micron = (mpp_x * scale_factor)**2
+        areas_microns = areas_pixels * pixel_to_micron
 
-    return areas_microns
+        return areas_microns.tolist()
+
+    except FileNotFoundError as e:
+        print(f"Skipping {superp_segments_path.name}: {e}")
+        return []
 
 
-def process_all_superpixels(segments_dir):
-    """Process all segmentation masks in the given directory."""
+def process_all_superpixels(segments_dir, num_workers=8):
+    """Process all segmentation masks in parallel."""
+    segment_paths = list(segments_dir.rglob("*.tiff"))
+
     all_areas = []
+    with ProcessPoolExecutor(max_workers=num_workers) as executor:
+        results = list(
+            tqdm(executor.map(process_superpixel_mask, segment_paths),
+                 total=len(segment_paths)))
 
-    for superp_segments_path in segments_dir.glob("*.tiff"):
-        try:
-            areas = process_superpixel_mask(superp_segments_path)
-            all_areas.extend(areas)
-        except FileNotFoundError as e:
-            print(f"Skipping {superp_segments_path.name}: {e}")
+    # Flatten the list of lists
+    for areas in results:
+        all_areas.extend(areas)
 
     return all_areas
 
@@ -80,7 +92,7 @@ def compute_statistics(areas):
     deviation_percent = abs(average_area -
                             TARGET_AVERAGE_AREA) / TARGET_AVERAGE_AREA * 100.0
 
-    print(f"\n=== Superpixel Segmentation Statistics ===")
+    print("\n=== Superpixel Segmentation Statistics ===")
     print(f"Total Superpixels Processed: {len(areas)}")
     print(f"Median Superpixel Area: {median_area:.2f} µm²")
     print(f"Average Superpixel Area: {average_area:.2f} µm²")
@@ -89,5 +101,6 @@ def compute_statistics(areas):
 
 
 if __name__ == "__main__":
-    all_superpixel_areas = process_all_superpixels(SEGMENTS_DIR)
+    all_superpixel_areas = process_all_superpixels(
+        SEGMENTS_DIR, num_workers=24)  # Adjust workers as needed
     compute_statistics(all_superpixel_areas)
