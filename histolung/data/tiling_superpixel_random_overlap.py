@@ -50,6 +50,7 @@ def process_wsi(
     average_n_tiles=10,
 ):
     logger.info(f"Starting tiling for WSI {wsi_path.name}")
+    # logger.info(f"with parameters: {locals()}")
     try:
         tile_processor = WSITilerWithSuperPixelMaskWithOverlap(
             wsi_path,
@@ -68,9 +69,10 @@ def process_wsi(
 
             with ThreadPool(processes=num_workers_tiles) as pool:
                 # results = list(
-                #     tqdm(pool.imap_unordered(tile_processor, superpixel_labels),
-                #         total=len(superpixel_labels),
-                #         desc="Processing superpixels"))
+                #     tqdm(pool.imap_unordered(tile_processor,
+                #                              superpixel_labels),
+                #          total=len(superpixel_labels),
+                #          desc="Processing superpixels"))
 
                 results = list(
                     pool.imap_unordered(
@@ -80,7 +82,8 @@ def process_wsi(
 
         else:
             results = [
-                tile_processor(label) for label in tqdm(superpixel_labels)
+                # tile_processor(label) for label in tqdm(superpixel_labels)
+                tile_processor(label) for label in superpixel_labels
             ]
 
         if any(isinstance(res, Exception) for res in results):
@@ -129,6 +132,7 @@ def tile_dataset(
     save_tile_overlay=False,
     magnification=10,
     debug_id=None,
+    save_metadata=True,
     average_superpixel_area=1000,
     average_n_tiles=10,
 ):
@@ -166,21 +170,31 @@ def tile_dataset(
         threshold,
         num_workers_tiles,
         save_tile_overlay,
+        save_metadata,
+        average_superpixel_area,
+        average_n_tiles,
     ) for mask_path in mask_files]
 
-    # with Pool(processes=num_workers_wsi) as pool:
-    #     results = list(
-    #         tqdm(pool.starmap(process_wsi, wsi_args),
-    #              total=len(wsi_args),
-    #              desc="Processing WSIs"))
+    if num_workers_wsi > 1:
+        with Pool(processes=num_workers_wsi) as pool:
+            results = list(
+                tqdm(
+                    pool.imap_unordered(process_wsi_wrapper, wsi_args),
+                    total=len(wsi_args),
+                    desc="Processing WSIs",
+                ))
 
-    with Pool(processes=num_workers_wsi) as pool:
-        results = list(
-            tqdm(
-                pool.imap_unordered(process_wsi_wrapper, wsi_args),
-                total=len(wsi_args),
-                desc="Processing WSIs",
-            ))
+    # if num_workers_wsi > 1:
+    #     with Pool(processes=num_workers_wsi) as pool:
+    #         results = list(
+    #             tqdm(pool.starmap(process_wsi, wsi_args),
+    #                  total=len(wsi_args),
+    #                  desc="Processing WSIs"))
+    else:
+        results = [
+            process_wsi(*args)
+            for args in tqdm(wsi_args, desc="Processing WSIs")
+        ]
 
     for wsi_arg, result in zip(wsi_args, results):
         wsi_path = wsi_arg[0]
@@ -193,7 +207,10 @@ if __name__ == "__main__":
     tcga_path = Path(os.getenv("TCGA_DATA_RAW_PATH"))
     project_dir = Path(__file__).parents[2].resolve()
     masks_path = project_dir / "data/interim/superpixels"
-    output_basedir = project_dir / "data/interim/tiles_superpixels"
+    # output_basedir = project_dir / "data/interim/tiles_superpixels"
+    output_basedir = Path(
+        "/mnt/nas7/data/Personal/Valentin/histopath/tiles_superpixels_with_overlap/"
+    )
     output_basedir.mkdir(exist_ok=True)
 
     data_paths = {
@@ -234,7 +251,7 @@ if __name__ == "__main__":
             num_workers_tiles=4,
             magnification=10,
             save_tile_overlay=True,
-            # debug_id="C3N-02155-24",
+            # debug_id="C3N-01488-27",
             average_superpixel_area=486800,
             average_n_tiles=20,
         )

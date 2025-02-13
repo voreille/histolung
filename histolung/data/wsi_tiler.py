@@ -599,88 +599,114 @@ class WSITilerWithSuperPixelMaskWithOverlap(WSITilerWithMask):
         logging.info(f"Overlay saved: {overlay_path}")
 
     def __call__(self, label):
+        """Process a single superpixel label, tiling it efficiently."""
 
         positions = np.where(self.mask_array == label)
         superpixel_area = positions[0].size
         superpixel_area_micron = superpixel_area * self.x_px_size_mask * self.y_px_size_mask
         n_tiles = int(
-            np.round(superpixel_area_micron /
-                        self.average_superpixel_area * self.average_n_tiles))
+            np.round(superpixel_area_micron / self.average_superpixel_area *
+                     self.average_n_tiles))
 
         if superpixel_area <= self.threshold * self.mask_tile_size**2:
             return
 
-        n_tiles_saved = 0
-        attempts = 0
-        while n_tiles_saved < n_tiles and attempts < self.max_iter:
-            attempts += 1
-            mask_y, mask_x = np.random.choice(
-                positions[0]), np.random.choice(positions[1])
+        min_y, max_y = positions[0].min(), positions[0].max()
+        min_x, max_x = positions[1].min(), positions[1].max()
 
-            # Get the mask patch (clipping to avoid out of bounds)
-            mask_patch = self.mask_array[mask_y:mask_y +
-                                            self.mask_tile_size,
-                                            mask_x:mask_x +
-                                            self.mask_tile_size]
-            coverage = np.mean(mask_patch == label)
-            if coverage >= self.threshold:
-                n_tiles_saved += 1
-                x_level0 = int(mask_x * self.mask_scale_factor +
-                                np.random.randint(
-                                    -self.mask_scale_factor // 2,
-                                    self.mask_scale_factor // 2,
-                                ))
-                y_level0 = int(mask_y * self.mask_scale_factor +
-                                np.random.randint(
-                                    -self.mask_scale_factor // 2,
-                                    self.mask_scale_factor // 2,
-                                ))
+        # Crop mask to the bounding box
+        cropped_mask = self.mask_array[min_y:max_y + 1, min_x:max_x + 1]
 
-                tile_id = f'{self.wsi_id}__l{label}__x{x_level0}_y{y_level0}'
+        # Compute coverage map **only within the cropped region**
+        coverage_map = uniform_filter((cropped_mask == label).astype(float),
+                                      size=self.mask_tile_size)
 
-                tile = self.wsi.read_region(
-                    (x_level0, y_level0),
-                    self.level,
-                    (self.level_tile_size, self.level_tile_size),
-                )
-                if self.level_tile_size != self.tile_size:
-                    tile = tile.resize((self.tile_size, self.tile_size),
-                                        Image.LANCZOS)
-                tile = tile.convert('RGB')  # Convert to RGB if necessary
+        # Find valid positions in the **cropped mask coordinates**
+        valid_y, valid_x = np.where(coverage_map >= self.threshold)
+        if valid_x.size == 0:
+            return
 
-                # Save the tile as a PNG
-                tile_path = self.tiles_output_dir / f"{tile_id}.png"
-                tile.save(tile_path)
+        # Convert cropped coordinates to **global mask coordinates**
+        valid_y += min_y - self.mask_tile_size // 2
+        valid_x += min_x - self.mask_tile_size // 2
 
-                # Outline the selected tiles on the thumbnail overlay
-                if self.save_tile_overlay:
-                    outline = Image.new(
-                        "RGBA", (self.mask_tile_size, self.mask_tile_size),
-                        (0, 255, 0, 128))
-                    self.wsi_thumbnail.paste(outline, (mask_x, mask_y),
-                                                outline)
+        # Ensure coordinates stay within bounds
+        valid_y = np.clip(valid_y, 0,
+                          self.mask_array.shape[0] - self.mask_tile_size)
+        valid_x = np.clip(valid_x, 0,
+                          self.mask_array.shape[1] - self.mask_tile_size)
 
-                # Save metadata
-                self.patch_metadata.append({
-                    "tile_id":
-                    tile_id,
-                    "x_level0":
-                    x_level0,
-                    "y_level0":
-                    y_level0,
-                    "x_current_level":
-                    int(x_level0 // self.downsample_factor),
-                    "y_current_level":
-                    int(y_level0 // self.downsample_factor),
-                    "row":
-                    int(y_level0 // self.level0_tile_size),
-                    "column":
-                    int(x_level0 // self.level0_tile_size),
-                    "label":
-                    label,
-                    "label_coverage_ratio":
-                    coverage,
-                })
+        # Stack them as valid tile positions
+        valid_positions = np.column_stack((valid_y, valid_x))
+
+        # Shuffle and take at most `n_tiles`
+        np.random.shuffle(valid_positions)
+        valid_positions = valid_positions[:n_tiles]
+
+        # If not enough tiles, sample with replacement
+        if len(valid_positions) < n_tiles:
+            additional_indices = np.random.choice(len(valid_positions),
+                                                  size=n_tiles -
+                                                  len(valid_positions),
+                                                  replace=True)
+            additional_positions = valid_positions[additional_indices]
+            valid_positions = np.vstack(
+                (valid_positions, additional_positions))
+
+        for mask_y, mask_x in valid_positions:
+            x_level0 = int(mask_x * self.mask_scale_factor +
+                           np.random.randint(-self.mask_scale_factor //
+                                             2, self.mask_scale_factor // 2))
+            y_level0 = int(mask_y * self.mask_scale_factor +
+                           np.random.randint(-self.mask_scale_factor //
+                                             2, self.mask_scale_factor // 2))
+
+            tile_id = f'{self.wsi_id}__l{label}__x{x_level0}_y{y_level0}'
+
+            tile = self.wsi.read_region(
+                (x_level0, y_level0),
+                self.level,
+                (self.level_tile_size, self.level_tile_size),
+            )
+            if self.level_tile_size != self.tile_size:
+                tile = tile.resize((self.tile_size, self.tile_size),
+                                   Image.LANCZOS)
+            tile = tile.convert('RGB')
+
+            # Save the tile
+            tile_path = self.tiles_output_dir / f"{tile_id}.png"
+            tile.save(tile_path)
+
+            # Outline the selected tiles on the thumbnail overlay
+            if self.save_tile_overlay:
+                outline = Image.new("RGBA",
+                                    (self.mask_tile_size, self.mask_tile_size),
+                                    (0, 255, 0, 128))
+                self.wsi_thumbnail.paste(outline, (mask_x, mask_y), outline)
+ 
+
+            # Save metadata
+            self.patch_metadata.append({
+                "tile_id":
+                tile_id,
+                "x_level0":
+                x_level0,
+                "y_level0":
+                y_level0,
+                "x_current_level":
+                int(x_level0 // self.downsample_factor),
+                "y_current_level":
+                int(y_level0 // self.downsample_factor),
+                "row":
+                int(y_level0 // self.level0_tile_size),
+                "column":
+                int(x_level0 // self.level0_tile_size),
+                "label":
+                label,
+                "label_coverage_ratio":
+                coverage_map[mask_y - min_y,
+                             mask_x - min_x],  # Adjusted for cropped mask
+            })
 
     def call_wip(self, label):
 
