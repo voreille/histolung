@@ -86,7 +86,8 @@ class LungHist700Evaluator(BaseEvaluator):
         aggregation_strategy=MeanAggregation(),
         seed=42,
         predefined_folds=None,
-        resolution="all",
+        magnification="all",
+        preprocess=None,
     ):
         """
         Initialize the evaluator.
@@ -125,25 +126,17 @@ class LungHist700Evaluator(BaseEvaluator):
         self.metadata = pd.read_csv(data_dir /
                                     "metadata.csv").set_index("tile_id")
 
-        if resolution == "20x":
-            self.metadata = self.metadata[self.metadata["resolution"] == "20x"]
-        elif resolution == "40x":
-            self.metadata = self.metadata[self.metadata["resolution"] == "10x"]
+        self.resolution = magnification
 
-        if resolution not in ["all", "20x", "40x"]:
-            raise ValueError(
-                "Invalid resolution. Choose from 'all', '20x', '40x'")
+        self.n_splits = n_splits
 
-        self.resolution = resolution
-
-        if n_splits == "LPO":
-            self.n_splits = len(self.metadata["patient_id"].unique())
-
-        preprocess = T.Compose([
-            T.Resize((tile_size, tile_size)),
-            T.ToTensor(),
-            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ])
+        if preprocess is None:
+            preprocess = T.Compose([
+                T.Resize((tile_size, tile_size)),
+                T.ToTensor(),
+                T.Normalize(mean=[0.485, 0.456, 0.406],
+                            std=[0.229, 0.224, 0.225]),
+            ])
 
         tile_paths = list(tiles_dir.glob("*.png"))
         tile_dataset = TileDataset(tile_paths, transform=preprocess)
@@ -152,21 +145,47 @@ class LungHist700Evaluator(BaseEvaluator):
                                      num_workers=num_workers,
                                      pin_memory=True)
 
-    def compute_embeddings(self, model):
+    def compute_embeddings(self, model, device=None):
         """Compute embeddings dynamically for the given model."""
-        model.to(self.device)
+        if device is None:
+            device = self.device
+        model.to(device)
         model.eval()
         embeddings, tile_ids = [], []
 
         for images, batch_tile_ids in tqdm(self.dataloader,
                                            desc="Computing embeddings"):
-            embeddings.append(model(images.to(self.device)).detach().cpu())
+            embeddings.append(model(images.to(device)).detach().cpu())
             tile_ids.extend(batch_tile_ids)
 
         return torch.cat(embeddings, dim=0).numpy(), np.array(tile_ids)
 
-    def evaluate(self, embeddings, tile_ids, verbose=False):
+    def filter_by_magnification(self, embeddings, tile_ids, magnification):
+        """Filter embeddings and tile IDs by magnification."""
+        magnification_mapping = {
+            "all": ["20x", "40x"],
+            "20x": ["20x"],
+            "40x": ["40x"],
+        }
+        mask = self.metadata.loc[tile_ids]["resolution"].isin(
+            magnification_mapping[magnification])
+        return embeddings[mask], tile_ids[mask]
+
+    def evaluate(self,
+                 embeddings,
+                 tile_ids,
+                 verbose=False,
+                 magnification="all"):
         """Evaluate the model using k-NN classification."""
+
+        if magnification not in ["all", "20x", "40x"]:
+            raise ValueError(
+                "Invalid resolution. Choose from 'all', '20x', '40x'")
+
+        if magnification != "all":
+            embeddings, tile_ids = self.filter_by_magnification(
+                embeddings, tile_ids, magnification)
+
         labels = self.metadata.loc[tile_ids]["superclass"].map(
             self.class_mapping).to_numpy()
         patient_ids = self.metadata.loc[tile_ids]["patient_id"].to_numpy()
@@ -193,16 +212,20 @@ class LungHist700Evaluator(BaseEvaluator):
 
         if self.predefined_folds is not None:
             cv_splitter = self.predefined_folds
-        else:
+        elif self.n_splits != "LPO":
             cv_splitter = StratifiedGroupKFold(n_splits=self.n_splits,
                                                shuffle=True,
                                                random_state=self.seed)
+            splits = cv_splitter.split(embeddings, labels, groups=patient_ids)
+        elif self.n_splits == "LPO":
+            unique_patient_ids = np.unique(patient_ids)
+            splits = [(patient_ids != pid, patient_ids == pid)
+                      for pid in unique_patient_ids]
 
         all_predictions, all_true_labels = [], []
         accuracies = []
 
-        for fold, (train_idx, test_idx) in enumerate(
-                cv_splitter.split(embeddings, labels, groups=patient_ids)):
+        for fold, (train_idx, test_idx) in enumerate(splits):
             X_train, X_test = embeddings[train_idx], embeddings[test_idx]
             y_train, y_test = labels[train_idx], labels[test_idx]
 
@@ -262,20 +285,21 @@ def load_embeddings(input_path):
 
 
 if __name__ == "__main__":
-    path_embeddings = project_dir / "data/processed/LungHist700/embeddings.npz"
+
+    path_embeddings = project_dir / f"data/processed/LungHist700/embeddings.npz"
 
     if path_embeddings.exists():
         embeddings, tile_ids = load_embeddings(path_embeddings)
         evaluator = LungHist700Evaluator()
     else:
+        device = get_device(gpu_id=1)
         model = BaseFeatureExtractor.get_feature_extractor(
             "UNI",
             weights_filepath=
             ("models/uni/assets/ckpts/vit_large_patch16_224.dinov2.uni_mass100k/pytorch_model.bin"
              ))
-        evaluator = LungHist700Evaluator()
+        evaluator = LungHist700Evaluator(device=device)
 
-        device = get_device(gpu_id=1)
         embeddings, tile_ids = evaluator.compute_embeddings(model)
         # **Save embeddings for future use**
         print(f"Saving embeddings to {path_embeddings}")
@@ -283,7 +307,10 @@ if __name__ == "__main__":
                             embeddings=embeddings,
                             tile_ids=tile_ids)
 
-    results = evaluator.evaluate(embeddings, tile_ids, verbose=True)
+    results = evaluator.evaluate(embeddings,
+                                 tile_ids,
+                                 verbose=True,
+                                 magnification="20x")
 
     print(
         f"\nk-NN Concatenated Accuracy: {results['concatenated_accuracy']:.4f}"
