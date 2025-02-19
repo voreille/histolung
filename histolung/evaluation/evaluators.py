@@ -20,10 +20,38 @@ from histolung.evaluation.datasets import TileDataset
 project_dir = Path(__file__).resolve().parents[2]
 
 
+class AggregationStrategy(ABC):
+
+    @abstractmethod
+    def aggregate(self, embeddings_df):
+        pass
+
+
+class MeanAggregation(AggregationStrategy):
+
+    def aggregate(self, embeddings_df):
+        return embeddings_df.groupby("image_id").mean().drop(
+            columns="patient_id")
+
+
+class NoAggregation(AggregationStrategy):
+
+    def aggregate(self, embeddings_df):
+        return embeddings_df.drop(columns="patient_id")
+
+
 class BaseEvaluator(ABC):
 
-    def __init__(self, test_loader):
+    def __init__(self, test_loader, aggregation_strategy: AggregationStrategy):
+        """
+        Initialize the evaluator.
+
+        Args:
+            test_loader (DataLoader): DataLoader for test set.
+            aggregation_strategy (AggregationStrategy): Strategy for aggregating embeddings.
+        """
         self.test_loader = test_loader
+        self.aggregation_strategy = aggregation_strategy
 
     @abstractmethod
     def evaluate(self, model):
@@ -34,12 +62,9 @@ class BaseEvaluator(ABC):
                               y_pred,
                               labels,
                               save_path="confusion_matrix.png"):
-        """Plot and save a normalized confusion matrix in percentages."""
-        cm = confusion_matrix(y_true, y_pred)
-        cm_percent = cm.astype(np.float64) / cm.sum(
-            axis=1, keepdims=True) * 100  # Normalize row-wise
-
-        disp = ConfusionMatrixDisplay(cm_percent, display_labels=labels)
+        """Plot and save a normalized confusion matrix."""
+        cm = confusion_matrix(y_true, y_pred, normalize="true")
+        disp = ConfusionMatrixDisplay(cm, display_labels=labels)
         fig, ax = plt.subplots(figsize=(6, 6))
         disp.plot(cmap="Blues", ax=ax, values_format=".1f")
         plt.title("Confusion Matrix (%)")
@@ -48,148 +73,164 @@ class BaseEvaluator(ABC):
 
 
 class LungHist700Evaluator(BaseEvaluator):
-    """
-    Evaluates SSL models on histopathology images using computed embeddings with only k-NN.
-    """
 
     def __init__(
-        self,
-        superclass_mapping=None,
-        data_dir="data/processed/LungHist700/",
-        tile_size=224,
-        batch_size=256,
-        num_workers=12,
-        n_splits="LPO",  # int or "LPO" for Leave-Patient-Out
-        device="cuda",
-        resolution="all",
-        preprocess=None,
+            self,
+            class_mapping=None,
+            data_dir="data/processed/LungHist700/",
+            tile_size=224,
+            batch_size=256,
+            num_workers=12,
+            gpu_id=0,
+            aggregation_strategy=MeanAggregation(),
+            preprocess=None,
     ):
-        """Initialize the evaluator with only k-NN."""
-        self.superclass_mapping = superclass_mapping or {
-            "nor": 0,
-            "aca": 1,
-            "scc": 2
-        }
+        """
+        Initialize the evaluator.
+
+        Args:
+            class_mapping (dict): Mapping of class labels to integer values.
+            data_dir (str, optional): Path to the processed dataset directory.
+            tile_size (int, optional): Tile image size for preprocessing.
+            batch_size (int, optional): Number of samples per batch.
+            num_workers (int, optional): Number of workers for DataLoader.
+            device (str, optional): Computation device (e.g., 'cuda', 'cpu').
+            aggregation_strategy (AggregationStrategy, optional): Strategy for aggregating embeddings.
+        """
+        device = get_device(gpu_id)
+
+        self.class_mapping = class_mapping or {"nor": 0, "aca": 1, "scc": 2}
+
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.device = device
+        self.aggregation_strategy = aggregation_strategy
 
-        # **Only use k-NN**
-        self.knn_classifier = Pipeline([("scaler", StandardScaler()),
-                                        ("classifier",
-                                         KNeighborsClassifier(n_neighbors=5))])
+        self.knn_classifier = Pipeline([
+            ("scaler", StandardScaler()),
+            ("classifier", KNeighborsClassifier(n_neighbors=5)),
+        ])
 
         data_dir = project_dir / data_dir
         tiles_dir = data_dir / "tiles"
         self.metadata = pd.read_csv(data_dir /
                                     "metadata.csv").set_index("tile_id")
-        if resolution == "20x":
-            self.metadata = self.metadata[self.metadata["resolution"] == "20x"]
-        elif resolution == "40x":
-            self.metadata = self.metadata[self.metadata["resolution"] == "10x"]
 
-        if resolution not in ["all", "20x", "40x"]:
-            raise ValueError(
-                "Invalid resolution. Choose from 'all', '20x', '40x'")
-
-        self.resolution = resolution
-
-        if n_splits == "LPO":
-            n_splits = len(self.metadata["patient_id"].unique())
-
-        self.n_splits = n_splits
         if preprocess is None:
             preprocess = T.Compose([
                 T.Resize((tile_size, tile_size)),
                 T.ToTensor(),
-                T.Normalize(
-                    mean=[0.485, 0.456, 0.406],
-                    std=[0.229, 0.224, 0.225],
-                ),
+                T.Normalize(mean=[0.485, 0.456, 0.406],
+                            std=[0.229, 0.224, 0.225]),
             ])
 
         tile_paths = list(tiles_dir.glob("*.png"))
-        if len(tile_paths) != 5636:
-            raise ValueError(f"Check the integrity of the LungHist700 "
-                             f"data should be 5639 tiles, {len(tile_paths)}"
-                             f" tiles were found.")
         tile_dataset = TileDataset(tile_paths, transform=preprocess)
-        self.dataloader = DataLoader(
-            tile_dataset,
-            batch_size=batch_size,
-            num_workers=num_workers,
-            prefetch_factor=2,
-            pin_memory=True,
-        )
+        self.dataloader = DataLoader(tile_dataset,
+                                     batch_size=batch_size,
+                                     num_workers=num_workers,
+                                     pin_memory=True)
 
-    def compute_embeddings(self, model):
+    def _check_n_splits(self, n_splits):
+        if isinstance(n_splits, int):
+            if n_splits <= 1:
+                raise ValueError(
+                    f"n_splits should be between 2 and {len(self.unique_patient_ids)} (number of unique patients)."
+                )
+        elif n_splits != "LPO":
+            raise ValueError("n_splits should be an integer or 'LPO'.")
+
+    def compute_embeddings(self, model, device=None):
         """Compute embeddings dynamically for the given model."""
-        model.to(self.device)
+        if device is None:
+            device = self.device
+        model.to(device)
         model.eval()
         embeddings, tile_ids = [], []
 
         for images, batch_tile_ids in tqdm(self.dataloader,
                                            desc="Computing embeddings"):
-            embeddings.append(model(images.to(self.device)).detach().cpu())
+            embeddings.append(model(images.to(device)).detach().cpu())
             tile_ids.extend(batch_tile_ids)
 
         return torch.cat(embeddings, dim=0).numpy(), np.array(tile_ids)
 
-    def evaluate(self, embeddings, tile_ids, verbose=False):
-        """
-        Compute embeddings and evaluate using only k-NN.
-        """
-        labels = self.metadata.loc[tile_ids]["superclass"].map(
-            self.superclass_mapping).to_numpy()
-        patient_ids = self.metadata.loc[tile_ids]["patient_id"].to_numpy()
+    def filter_by_magnification(self, embeddings, tile_ids, magnification):
+        """Filter embeddings and tile IDs by magnification."""
+        magnification_mapping = {
+            "all": ["20x", "40x"],
+            "20x": ["20x"],
+            "40x": ["40x"],
+        }
+        mask = self.metadata.loc[tile_ids]["resolution"].isin(
+            magnification_mapping[magnification])
+        return embeddings[mask], tile_ids[mask]
 
-        # Ensure all metadata is present
-        missing_tiles = set(tile_ids) - set(self.metadata.index)
-        if missing_tiles:
-            raise ValueError(f"Missing metadata for tiles: {missing_tiles}")
+    def evaluate(self,
+                 embeddings,
+                 tile_ids,
+                 verbose=False,
+                 n_splits="LPO",
+                 seed=42,
+                 magnification="all"):
+        """Evaluate the model using k-NN classification."""
+        self._check_n_splits(n_splits)
+
+        if magnification not in ["all", "20x", "40x"]:
+            raise ValueError(
+                "Invalid resolution. Choose from 'all', '20x', '40x'")
+
+        if magnification != "all":
+            embeddings, tile_ids = self.filter_by_magnification(
+                embeddings, tile_ids, magnification)
+
+        labels = self.metadata.loc[tile_ids]["superclass"].map(
+            self.class_mapping).to_numpy()
+        patient_ids = self.metadata.loc[tile_ids]["patient_id"].to_numpy()
 
         df = pd.DataFrame(embeddings)
         df["image_id"] = self.metadata.loc[tile_ids][
             "original_filename"].to_list()
         df["patient_id"] = patient_ids
 
-        # Aggregate embeddings while preserving patient_id
-        averaged_df = df.groupby("image_id").agg({
-            **{
-                col: "mean"
-                for col in df.columns if col not in ["image_id", "patient_id"]
-            },
-            "patient_id": "first",
-        })
-
-        # Convert back to numpy
-        averaged_embeddings = averaged_df.drop(columns="patient_id").to_numpy()
-        image_ids = averaged_df.index.to_list()
+        aggregated_df = self.aggregation_strategy.aggregate(df)
+        image_ids = aggregated_df.index.to_list()
 
         grouped_metadata = self.metadata.groupby("original_filename").agg({
             "patient_id":
-            lambda x: x.iloc[0] if x.nunique() == 1 else ValueError(
-                f"Inconsistent patient_ids for {x.name}"),
+            "first",
             "superclass":
-            lambda x: x.iloc[0] if x.nunique() == 1 else ValueError(
-                f"Inconsistent superclass for {x.name}"),
+            "first"
         })
 
-        embeddings = averaged_embeddings
+        embeddings = aggregated_df.to_numpy()
         labels = grouped_metadata.loc[image_ids]["superclass"].map(
-            self.superclass_mapping).to_numpy()
-        patient_ids = grouped_metadata.loc[image_ids]["patient_id"].to_list()
+            self.class_mapping).to_numpy()
+        patient_ids = grouped_metadata.loc[image_ids]["patient_id"].values
 
-        # Stratified Cross-Validation
-        cv_splitter = StratifiedGroupKFold(n_splits=self.n_splits,
-                                           shuffle=True,
-                                           random_state=42)
+        # Create splits
+        if n_splits == "LPO":
+            splits = [(patient_ids != pid, patient_ids == pid)
+                      for pid in np.unique(patient_ids)]
+        else:
+            cv_splitter = StratifiedGroupKFold(
+                n_splits=n_splits,
+                shuffle=True,
+                random_state=seed,
+            )
+            splits = list(
+                cv_splitter.split(
+                    embeddings,
+                    labels,
+                    groups=patient_ids,
+                ))
 
         all_predictions, all_true_labels = [], []
         accuracies = []
 
-        for fold, (train_idx, test_idx) in enumerate(
-                cv_splitter.split(embeddings, labels, groups=patient_ids)):
+        for fold, (train_idx, test_idx) in enumerate(splits):
+            assert set(patient_ids[train_idx]).isdisjoint(
+                set(patient_ids[test_idx]))
             X_train, X_test = embeddings[train_idx], embeddings[test_idx]
             y_train, y_test = labels[train_idx], labels[test_idx]
 
@@ -249,21 +290,22 @@ def load_embeddings(input_path):
 
 
 if __name__ == "__main__":
-    path_embeddings = project_dir / "data/processed/LungHist700/embeddings.npz"
+
+    path_embeddings = project_dir / f"data/processed/LungHist700_20x/embeddings.npz"
+    data_dir = project_dir / f"data/processed/LungHist700_20x"
 
     if path_embeddings.exists():
         embeddings, tile_ids = load_embeddings(path_embeddings)
-        evaluator = LungHist700Evaluator()
+        evaluator = LungHist700Evaluator(data_dir=data_dir)
     else:
+        device = get_device(gpu_id=1)
         model = BaseFeatureExtractor.get_feature_extractor(
             "UNI",
             weights_filepath=
             ("models/uni/assets/ckpts/vit_large_patch16_224.dinov2.uni_mass100k/pytorch_model.bin"
-             ),
-        )
-        evaluator = LungHist700Evaluator()
+             ))
+        evaluator = LungHist700Evaluator(gpu_id=1, data_dir=data_dir)
 
-        device = get_device(gpu_id=1)
         embeddings, tile_ids = evaluator.compute_embeddings(model)
         # **Save embeddings for future use**
         print(f"Saving embeddings to {path_embeddings}")
@@ -271,7 +313,12 @@ if __name__ == "__main__":
                             embeddings=embeddings,
                             tile_ids=tile_ids)
 
-    results = evaluator.evaluate(embeddings, tile_ids, verbose=True)
+    results = evaluator.evaluate(
+        embeddings,
+        tile_ids,
+        verbose=True,
+        #  n_splits=5,
+        magnification="20x")
 
     print(
         f"\nk-NN Concatenated Accuracy: {results['concatenated_accuracy']:.4f}"
