@@ -75,15 +75,20 @@ class BaseEvaluator(ABC):
 class LungHist700Evaluator(BaseEvaluator):
 
     def __init__(
-            self,
-            class_mapping=None,
-            data_dir="data/processed/LungHist700/",
-            tile_size=224,
-            batch_size=256,
-            num_workers=12,
-            gpu_id=0,
-            aggregation_strategy=MeanAggregation(),
-            preprocess=None,
+        self,
+        class_mapping=None,
+        data_dir="data/processed/LungHist700/",
+        tile_size=224,
+        batch_size=256,
+        num_workers=12,
+        gpu_id=0,
+        aggregation_strategy=MeanAggregation(),
+        preprocess=None,
+        # Default arguments for `evaluate`
+        n_splits="LPO",
+        seed=42,
+        magnification="all",
+        aggregate=True,
     ):
         """
         Initialize the evaluator.
@@ -94,8 +99,12 @@ class LungHist700Evaluator(BaseEvaluator):
             tile_size (int, optional): Tile image size for preprocessing.
             batch_size (int, optional): Number of samples per batch.
             num_workers (int, optional): Number of workers for DataLoader.
-            device (str, optional): Computation device (e.g., 'cuda', 'cpu').
+            gpu_id (int, optional): GPU device ID.
             aggregation_strategy (AggregationStrategy, optional): Strategy for aggregating embeddings.
+            preprocess (callable, optional): Preprocessing pipeline.
+            n_splits (int or str, optional): Number of splits for cross-validation ("LPO" for Leave-Patient-Out).
+            seed (int, optional): Random seed for reproducibility.
+            magnification (str, optional): Magnification level ("all", "20x", "40x").
         """
         device = get_device(gpu_id)
 
@@ -105,6 +114,12 @@ class LungHist700Evaluator(BaseEvaluator):
         self.num_workers = num_workers
         self.device = device
         self.aggregation_strategy = aggregation_strategy
+
+        # Default evaluation parameters
+        self.default_n_splits = n_splits
+        self.default_seed = seed
+        self.default_magnification = magnification
+        self.default_aggregate = aggregate
 
         self.knn_classifier = Pipeline([
             ("scaler", StandardScaler()),
@@ -170,15 +185,26 @@ class LungHist700Evaluator(BaseEvaluator):
                  embeddings,
                  tile_ids,
                  verbose=False,
-                 n_splits="LPO",
-                 seed=42,
-                 magnification="all"):
-        """Evaluate the model using k-NN classification."""
+                 n_splits=None,
+                 seed=None,
+                 aggregate=None,
+                 magnification=None):
+        """Evaluate the model using k-NN classification.
+
+        If `n_splits`, `seed`, or `magnification` are not provided, use defaults set during initialization.
+        """
+
+        # Use instance defaults if not overridden
+        n_splits = n_splits if n_splits is not None else self.default_n_splits
+        seed = seed if seed is not None else self.default_seed
+        magnification = magnification if magnification is not None else self.default_magnification
+        aggregate = aggregate if aggregate is not None else self.default_aggregate
+
         self._check_n_splits(n_splits)
 
         if magnification not in ["all", "20x", "40x"]:
             raise ValueError(
-                "Invalid resolution. Choose from 'all', '20x', '40x'")
+                "Invalid magnification. Choose from 'all', '20x', '40x'")
 
         if magnification != "all":
             embeddings, tile_ids = self.filter_by_magnification(
@@ -188,25 +214,28 @@ class LungHist700Evaluator(BaseEvaluator):
             self.class_mapping).to_numpy()
         patient_ids = self.metadata.loc[tile_ids]["patient_id"].to_numpy()
 
-        df = pd.DataFrame(embeddings)
-        df["image_id"] = self.metadata.loc[tile_ids][
-            "original_filename"].to_list()
-        df["patient_id"] = patient_ids
+        if aggregate:
+            df = pd.DataFrame(embeddings)
+            df["image_id"] = self.metadata.loc[tile_ids][
+                "original_filename"].to_list()
+            df["patient_id"] = patient_ids
 
-        aggregated_df = self.aggregation_strategy.aggregate(df)
-        image_ids = aggregated_df.index.to_list()
+            aggregated_df = self.aggregation_strategy.aggregate(df)
+            image_ids = aggregated_df.index.to_list()
 
-        grouped_metadata = self.metadata.groupby("original_filename").agg({
-            "patient_id":
-            "first",
-            "superclass":
-            "first"
-        })
+            grouped_metadata = self.metadata.groupby("original_filename").agg({
+                "patient_id":
+                "first",
+                "superclass":
+                "first"
+            })
 
-        embeddings = aggregated_df.to_numpy()
-        labels = grouped_metadata.loc[image_ids]["superclass"].map(
-            self.class_mapping).to_numpy()
-        patient_ids = grouped_metadata.loc[image_ids]["patient_id"].values
+            embeddings = aggregated_df.to_numpy()
+            labels = grouped_metadata.loc[image_ids]["superclass"].map(
+                self.class_mapping).to_numpy()
+            patient_ids = grouped_metadata.loc[image_ids]["patient_id"].values
+        else:
+            image_ids = tile_ids
 
         # Create splits
         if n_splits == "LPO":
