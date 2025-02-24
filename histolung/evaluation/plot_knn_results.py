@@ -127,6 +127,7 @@ def main():
     magnification = "all"
     tiling_magnification = "10x"
     aggregate = True
+    n_neighbors = 5
     exp_name = "superpixel_org"
     # exp_name = "superpixels_resnet50__alpha_0.5__ablation"
     project_dir = Path(__file__).parents[2].resolve()
@@ -150,6 +151,7 @@ def main():
         f"data/processed/LungHist700_{tiling_magnification}",
         n_splits=5,
         aggregate=aggregate,
+        n_neighbors=n_neighbors,
     )
 
     checkpoint_paths = [f for f in checkpoint_dir.glob("*.pth")]

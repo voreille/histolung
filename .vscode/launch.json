@@ -43,13 +43,13 @@
             "args": [
                 "tile-wsi-task",
                 "--dataset",
-                "tcga_lusc",
+                "cptac_lusc",
                 "--num_workers",
                 "12",
-                "--debug_id",
-                "TCGA-21-1080-01Z-00-DX1",
+                // "--debug_id",
+                // "TCGA-21-1080-01Z-00-DX1",
                 "-c",
-                "/home/valentin/workspaces/histolung/histolung/config/datasets_config_ts_672_10x.yaml",
+                "/home/valentin/workspaces/histolung/histolung/config/datasets_config_ts_224_20x.yaml",
             ],
             "console": "integratedTerminal"
         },

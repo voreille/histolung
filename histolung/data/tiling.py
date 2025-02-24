@@ -15,12 +15,12 @@ load_dotenv()
 DEBUG = False
 project_dir = Path(__file__).parents[2].resolve()
 
-config = load_yaml_with_env(project_dir /
-                            "histolung/config/datasets_config.yaml")
+# config = load_yaml_with_env(project_dir /
+#                             "histolung/config/datasets_config.yaml")
 
-output_basedir = project_dir / ("data/interim/debug_tiles"
-                                if DEBUG else config["tiles_basedir"])
-output_basedir.mkdir(exist_ok=True)
+# output_basedir = project_dir / ("data/interim/debug_tiles"
+#                                 if DEBUG else config["tiles_basedir"])
+# output_basedir.mkdir(exist_ok=True)
 
 # Configure logger
 logger = logging.getLogger(__name__)
