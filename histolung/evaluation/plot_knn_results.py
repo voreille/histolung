@@ -4,6 +4,7 @@ from pathlib import Path
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
+import torch.nn as nn
 
 from histolung.evaluation.evaluators import LungHist700Evaluator
 from histolung.models.models_darya import MoCoV2Encoder
@@ -22,16 +23,41 @@ def get_device(gpu_id=None):
     return device
 
 
+# def load_model(checkpoint_path, device):
+#     """Load the MoCoV2 model from a given checkpoint."""
+#     if not checkpoint_path.exists():
+#         print(f"Checkpoint {checkpoint_path} not found, skipping...")
+#         return None
+
+#     model = MoCoV2Encoder()
+#     checkpoint = torch.load(checkpoint_path, map_location="cpu")
+#     model.load_state_dict(checkpoint["model_state_dict"])
+#     return model.encoder_q.to(device).eval()
+
+
 def load_model(checkpoint_path, device):
-    """Load the MoCoV2 model from a given checkpoint."""
+    """Load the MoCoV2 model from a given checkpoint, handling missing keys like queue_ptr."""
+    checkpoint_path = Path(checkpoint_path)
     if not checkpoint_path.exists():
         print(f"Checkpoint {checkpoint_path} not found, skipping...")
-        return None
+        return None, None
 
     model = MoCoV2Encoder()
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
-    model.load_state_dict(checkpoint["model_state_dict"])
-    return model.encoder_q.to(device).eval()
+
+    # Load the model state dict with strict=False to ignore missing keys (like queue_ptr)
+    missing_keys, unexpected_keys = model.load_state_dict(
+        checkpoint["model_state_dict"], strict=False)
+
+    if missing_keys:
+        print(f"Warning: Missing keys in checkpoint: {missing_keys}")
+    if unexpected_keys:
+        print(f"Warning: Unexpected keys in checkpoint: {unexpected_keys}")
+
+    encoder = model.encoder_q
+    encoder.fc = nn.Identity()
+
+    return encoder.to(device).eval()
 
 
 def evaluate_checkpoint(evaluator, checkpoint_path, device):
@@ -100,8 +126,9 @@ def main():
     n_splits = 5
     magnification = "all"
     tiling_magnification = "10x"
-    aggregate = False
-    exp_name = "superpixels_moco_org"
+    aggregate = True
+    exp_name = "superpixel_org"
+    # exp_name = "superpixels_resnet50__alpha_0.5__ablation"
     project_dir = Path(__file__).parents[2].resolve()
     checkpoint_dir = Path(
         "/mnt/nas7/data/Personal/Darya/saved_models") / exp_name
@@ -112,13 +139,13 @@ def main():
     plot_save_path = project_dir / f"reports/{exp_name}/{plot_filename}.png"
 
     # Device setup
-    device = get_device(gpu_id=0)
+    device = get_device(gpu_id=1)
 
     # Initialize evaluator
     evaluator = LungHist700Evaluator(
         batch_size=256,
         num_workers=4,
-        gpu_id=0,
+        gpu_id=1,
         data_dir=project_dir /
         f"data/processed/LungHist700_{tiling_magnification}",
         n_splits=5,
