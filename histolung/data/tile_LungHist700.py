@@ -13,7 +13,7 @@ load_dotenv()
 # Define the folder containing the images and the output folder
 project_dir = Path(__file__).parents[2].resolve()
 input_folder = Path(os.getenv("LUNGHIST700_RAW"))
-output_folder = project_dir / "data/processed/LungHist700"
+output_folder = project_dir / "data/processed/LungHist700_20x"
 tiles_folder = output_folder / "tiles"
 outline_folder = output_folder / "outline"
 tiles_folder.mkdir(parents=True, exist_ok=True)
@@ -21,7 +21,7 @@ outline_folder.mkdir(parents=True, exist_ok=True)
 
 # Define tile size and desired magnification
 tile_size = 224
-desired_magnification = 10
+desired_magnification = 20
 tile_dataset = True
 
 # Define border styles
