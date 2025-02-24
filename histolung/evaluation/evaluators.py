@@ -89,6 +89,7 @@ class LungHist700Evaluator(BaseEvaluator):
         seed=42,
         magnification="all",
         aggregate=True,
+        n_neighbors=5,
     ):
         """
         Initialize the evaluator.
@@ -123,7 +124,7 @@ class LungHist700Evaluator(BaseEvaluator):
 
         self.knn_classifier = Pipeline([
             ("scaler", StandardScaler()),
-            ("classifier", KNeighborsClassifier(n_neighbors=5)),
+            ("classifier", KNeighborsClassifier(n_neighbors=n_neighbors)),
         ])
 
         data_dir = project_dir / data_dir
