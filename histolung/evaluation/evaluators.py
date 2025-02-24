@@ -189,7 +189,8 @@ class LungHist700Evaluator(BaseEvaluator):
                  n_splits=None,
                  seed=None,
                  aggregate=None,
-                 magnification=None):
+                 magnification=None,
+                 n_neighbors=None):
         """Evaluate the model using k-NN classification.
 
         If `n_splits`, `seed`, or `magnification` are not provided, use defaults set during initialization.
@@ -200,6 +201,13 @@ class LungHist700Evaluator(BaseEvaluator):
         seed = seed if seed is not None else self.default_seed
         magnification = magnification if magnification is not None else self.default_magnification
         aggregate = aggregate if aggregate is not None else self.default_aggregate
+        if n_neighbors is None:
+            knn_classifier = self.knn_classifier
+        else:
+            knn_classifier = Pipeline([
+                ("scaler", StandardScaler()),
+                ("classifier", KNeighborsClassifier(n_neighbors=n_neighbors)),
+            ])
 
         self._check_n_splits(n_splits)
 
@@ -264,8 +272,8 @@ class LungHist700Evaluator(BaseEvaluator):
             X_train, X_test = embeddings[train_idx], embeddings[test_idx]
             y_train, y_test = labels[train_idx], labels[test_idx]
 
-            self.knn_classifier.fit(X_train, y_train)
-            y_pred = self.knn_classifier.predict(X_test)
+            knn_classifier.fit(X_train, y_train)
+            y_pred = knn_classifier.predict(X_test)
 
             all_predictions.extend(y_pred)
             all_true_labels.extend(y_test)
