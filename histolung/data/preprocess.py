@@ -134,7 +134,7 @@ def parse_histoqc_config_mapping(filepath, input_dir):
 @click.option("--dataset",
               required=True,
               help="Dataset name (e.g., 'tcga_luad')")
-@click.option("--num_workers",
+@click.option("--num-workers",
               default=1,
               show_default=True,
               help="Number of workers for parallel processing")
@@ -201,7 +201,7 @@ def run_histoqc_task(dataset, num_workers, config):
 @click.option("--dataset",
               required=True,
               help="Dataset name (e.g., 'tcga_luad')")
-@click.option("--num_workers",
+@click.option("--num-workers",
               default=1,
               show_default=True,
               help="Number of workers for parallel processing")
@@ -327,7 +327,7 @@ def write_tiles_metadata(config):
     help="magnification for tiling the WSI images",
 )
 @click.option(
-    "--num_workers",
+    "--num-workers",
     type=click.INT,
     default=1,
     show_default=True,
