@@ -107,13 +107,13 @@ class LungHist700Evaluator(BaseEvaluator):
             seed (int, optional): Random seed for reproducibility.
             magnification (str, optional): Magnification level ("all", "20x", "40x").
         """
-        device = get_device(gpu_id)
 
         self.class_mapping = class_mapping or {"nor": 0, "aca": 1, "scc": 2}
 
+        self.device = get_device(gpu_id)
+
         self.batch_size = batch_size
         self.num_workers = num_workers
-        self.device = device
         self.aggregation_strategy = aggregation_strategy
 
         # Default evaluation parameters
@@ -171,6 +171,33 @@ class LungHist700Evaluator(BaseEvaluator):
 
         return torch.cat(embeddings, dim=0).numpy(), np.array(tile_ids)
 
+    def aggregate_embeddings(self, embeddings, tile_ids):
+
+        labels = self.metadata.loc[tile_ids]["superclass"].map(
+            self.class_mapping).to_numpy()
+        patient_ids = self.metadata.loc[tile_ids]["patient_id"].to_numpy()
+
+        df = pd.DataFrame(embeddings)
+        df["image_id"] = self.metadata.loc[tile_ids][
+            "original_filename"].to_list()
+        df["patient_id"] = patient_ids
+
+        aggregated_df = self.aggregation_strategy.aggregate(df)
+        image_ids = aggregated_df.index.to_list()
+
+        grouped_metadata = self.metadata.groupby("original_filename").agg({
+            "patient_id":
+            "first",
+            "superclass":
+            "first"
+        })
+
+        aggregated_embeddings = aggregated_df.to_numpy()
+        labels = grouped_metadata.loc[image_ids]["superclass"].map(
+            self.class_mapping).to_numpy()
+        patient_ids = grouped_metadata.loc[image_ids]["patient_id"].values
+        return aggregated_embeddings, image_ids, labels, patient_ids
+
     def filter_by_magnification(self, embeddings, tile_ids, magnification):
         """Filter embeddings and tile IDs by magnification."""
         magnification_mapping = {
@@ -219,32 +246,14 @@ class LungHist700Evaluator(BaseEvaluator):
             embeddings, tile_ids = self.filter_by_magnification(
                 embeddings, tile_ids, magnification)
 
-        labels = self.metadata.loc[tile_ids]["superclass"].map(
-            self.class_mapping).to_numpy()
-        patient_ids = self.metadata.loc[tile_ids]["patient_id"].to_numpy()
-
         if aggregate:
-            df = pd.DataFrame(embeddings)
-            df["image_id"] = self.metadata.loc[tile_ids][
-                "original_filename"].to_list()
-            df["patient_id"] = patient_ids
-
-            aggregated_df = self.aggregation_strategy.aggregate(df)
-            image_ids = aggregated_df.index.to_list()
-
-            grouped_metadata = self.metadata.groupby("original_filename").agg({
-                "patient_id":
-                "first",
-                "superclass":
-                "first"
-            })
-
-            embeddings = aggregated_df.to_numpy()
-            labels = grouped_metadata.loc[image_ids]["superclass"].map(
-                self.class_mapping).to_numpy()
-            patient_ids = grouped_metadata.loc[image_ids]["patient_id"].values
+            embeddings, image_ids, labels, patient_ids = self.aggregate_embeddings(
+                embeddings, tile_ids)
         else:
             image_ids = tile_ids
+            labels = self.metadata.loc[tile_ids]["superclass"].map(
+                self.class_mapping).to_numpy()
+            patient_ids = self.metadata.loc[tile_ids]["patient_id"].to_numpy()
 
         # Create splits
         if n_splits == "LPO":

@@ -126,7 +126,7 @@ def main():
     n_splits = 5
     magnification = "all"
     tiling_magnification = "10x"
-    aggregate = True
+    aggregate = False
     n_neighbors = 5
     exp_name = "superpixel_org"
     # exp_name = "superpixels_resnet50__alpha_0.5__ablation"
